@@ -25,7 +25,7 @@ const backgroundFiles = <(String, String)>[
   ('Rừng chết', 'backgrounds/4/dead forest.png'),
 ];
 
-/// Offline prototype: an arena, a switchable hero, monsters, loot, quests.
+/// Offline prototype: stages of slimes, a selectable hero, loot, quests.
 class VillageGame extends FlameGame with KeyboardEvents {
   VillageGame()
       : super(
@@ -36,19 +36,26 @@ class VillageGame extends FlameGame with KeyboardEvents {
   static const double worldHeight = 450;
   static const double groundTop = 200; // feet can go from groundTop + 50
   static const double groundBottom = 425;
-  static final npcPosition = Vector2(110, 330);
-  static final playerStart = Vector2(400, 350);
+  static final playerStart = Vector2(80, 350);
+
+  /// Kills needed to open the exit arrow of a stage.
+  static const killGoal = 50;
 
   final GameState state = GameState();
   late final Player player;
-  late final Npc npc;
   late final Background background;
   late final JoystickComponent joystick;
   final List<Monster> monsters = [];
   final Set<LogicalKeyboardKey> _keys = {};
 
-  /// Whether the quest panel was opened by talking to the NPC.
-  bool questAtNpc = false;
+  int stage = 0;
+  int stageKills = 0;
+  int selectedHero = 0;
+
+  /// True while a run is being played (false on the select / game over screens).
+  bool inPlay = false;
+
+  bool get portalOpen => stageKills >= killGoal;
 
   @override
   Color backgroundColor() => Colors.black;
@@ -78,13 +85,9 @@ class VillageGame extends FlameGame with KeyboardEvents {
 
     background = Background();
     world.add(background);
-    npc = Npc()..position = npcPosition;
-    world.add(npc);
+    world.add(ExitArrow());
     player = Player()..position = playerStart.clone();
     world.add(player);
-    for (var i = 0; i < 7; i++) {
-      _spawnMonster();
-    }
 
     joystick = JoystickComponent(
       knob: CircleComponent(
@@ -97,22 +100,112 @@ class VillageGame extends FlameGame with KeyboardEvents {
     );
     camera.viewport.addAll([
       joystick,
-      SkillButton(0, 34, Vector2(770, 420)),
-      SkillButton(1, 26, Vector2(688, 420)),
-      SkillButton(2, 26, Vector2(630, 420)),
-      SkillButton(3, 26, Vector2(572, 420)),
+      // Attack 1 (basic), then the two skills (attack 2 / attack 3).
+      ActionButton('Đánh', 'J', const Color(0xFFE53935), 36, Vector2(745, 385),
+          () => player.useSkill(0),
+          cooldown: () => player.cooldownFraction(0)),
+      ActionButton('', 'K', const Color(0xFF1E88E5), 28, Vector2(662, 405),
+          () => player.useSkill(1),
+          cooldown: () => player.cooldownFraction(1),
+          title: () => player.skillName(1)),
+      ActionButton('', 'L', const Color(0xFF7E57C2), 28, Vector2(692, 325),
+          () => player.useSkill(2),
+          cooldown: () => player.cooldownFraction(2),
+          title: () => player.skillName(2)),
+      // Support buttons: run, shield, jump.
+      ActionButton('Chạy', 'Shift', const Color(0xFFF9A825), 22,
+          Vector2(598, 424), () => player.toggleRun(),
+          active: () => player.running),
+      ActionButton('Khiên', 'F', const Color(0xFF43A047), 22,
+          Vector2(578, 372), () => player.useSkill(3),
+          cooldown: () => player.cooldownFraction(3),
+          active: () => player.shielded),
+      ActionButton('Nhảy', 'X', const Color(0xFF00ACC1), 22, Vector2(612, 322),
+          () => player.jump(),
+          cooldown: () => player.jumpCooldownFraction),
       Hud(),
     ]);
+    pauseEngine(); // wait on the character select overlay
+  }
+
+  // ---- run flow ----
+  void startGame(int heroIndex) {
+    selectedHero = heroIndex;
+    restart();
+  }
+
+  Future<void> restart() async {
+    state.reset();
+    stage = 0;
+    await background.setIndex(0);
+    _beginStage();
+    overlays
+      ..remove('select')
+      ..remove('gameover')
+      ..add('hud');
+    inPlay = true;
+    resumeEngine();
+  }
+
+  void openSelect() {
+    inPlay = false;
+    _keys.clear();
+    overlays
+      ..remove('gameover')
+      ..remove('hud')
+      ..remove('inventory')
+      ..remove('quests')
+      ..add('select');
+    pauseEngine();
+  }
+
+  void _beginStage() {
+    for (final m in List<Monster>.from(monsters)) {
+      m.removeFromParent();
+    }
+    monsters.clear();
+    for (final d in world.children.whereType<Drop>().toList()) {
+      d.removeFromParent();
+    }
+    stageKills = 0;
+    player.reset(selectedHero);
+    for (var i = 0; i < 7; i++) {
+      _spawnMonster();
+    }
+  }
+
+  Future<void> nextStage() async {
+    if (_changingStage) return;
+    _changingStage = true;
+    stage++;
+    await background.setIndex(stage % backgroundFiles.length);
+    final keepHp = state.hp;
+    _beginStage();
+    state.hp = min(state.maxHp, max(keepHp, state.maxHp ~/ 2));
+    state.touch();
+    world.add(
+        FloatingText('Màn ${stage + 1}', Vector2(400, 150), Colors.yellow));
+    _changingStage = false;
+  }
+
+  bool _changingStage = false;
+
+  void gameOver() {
+    if (!inPlay) return;
+    inPlay = false;
+    _keys.clear();
+    overlays
+      ..remove('hud')
+      ..remove('inventory')
+      ..remove('quests')
+      ..add('gameover');
+    pauseEngine();
   }
 
   void _spawnMonster() {
-    final roll = _rng.nextDouble();
-    final kind = roll < .6
-        ? MonsterKind.slime
-        : (roll < .8 ? MonsterKind.fighter : MonsterKind.samurai);
-    final m = Monster(kind)
+    final m = Monster(MonsterKind.slime, stage)
       ..position = Vector2(
-          250 + _rng.nextDouble() * (worldWidth - 320),
+          250 + _rng.nextDouble() * (worldWidth - 340),
           groundTop + 60 + _rng.nextDouble() * (groundBottom - groundTop - 70));
     monsters.add(m);
     world.add(m);
@@ -121,8 +214,15 @@ class VillageGame extends FlameGame with KeyboardEvents {
   void monsterDied(Monster m) {
     monsters.remove(m);
     state.onKill();
-    final human = m.kind != MonsterKind.slime;
-    final gold = (5 + _rng.nextInt(11)) * (human ? 3 : 1);
+    if (stageKills < killGoal) {
+      stageKills++;
+      if (portalOpen) {
+        world.add(FloatingText('Hoàn thành màn! Đi sang phải →',
+            Vector2(400, 150), Colors.yellow));
+      }
+    }
+    state.touch();
+    final gold = 5 + _rng.nextInt(11) + stage * 3;
     state.gold += gold;
     world.add(FloatingText('+$gold vàng', m.position + Vector2(0, -50),
         const Color(0xFFFFD54F)));
@@ -133,11 +233,14 @@ class VillageGame extends FlameGame with KeyboardEvents {
       }
     }
 
-    drop(ItemId.gel, human ? 0 : .65);
-    drop(ItemId.potion, human ? .3 : .15);
-    drop(ItemId.stone, human ? .4 : .2);
-    Future.delayed(const Duration(seconds: 4), () {
-      if (isMounted) _spawnMonster();
+    drop(ItemId.gel, .65);
+    drop(ItemId.potion, .15);
+    drop(ItemId.stone, .2);
+    final spawnStage = stage;
+    Future.delayed(const Duration(seconds: 3), () {
+      if (isMounted && inPlay && spawnStage == stage && !portalOpen) {
+        _spawnMonster();
+      }
     });
   }
 
@@ -154,24 +257,14 @@ class VillageGame extends FlameGame with KeyboardEvents {
     overlays
       ..remove('inventory')
       ..remove('quests');
-    resumeEngine();
+    if (inPlay) resumeEngine();
   }
 
   bool get panelOpen =>
       overlays.isActive('inventory') || overlays.isActive('quests');
 
-  void talkToNpc() {
-    if (panelOpen) return;
-    if (player.position.distanceTo(npc.position) > 140) {
-      world.add(FloatingText('Lại gần làng trưởng hơn',
-          npc.position + Vector2(0, -110), Colors.white));
-      return;
-    }
-    questAtNpc = true;
-    openPanel('quests');
-  }
-
   void quickPotion() {
+    if (!inPlay || player.dead) return;
     if (!state.usePotion()) {
       world.add(FloatingText('Không dùng được',
           player.position + Vector2(0, -90), Colors.white));
@@ -181,9 +274,9 @@ class VillageGame extends FlameGame with KeyboardEvents {
     }
   }
 
-  void switchCharacter() => player.switchCharacter();
-
-  Future<void> nextBackground() => background.next();
+  bool get shiftHeld =>
+      _keys.contains(LogicalKeyboardKey.shiftLeft) ||
+      _keys.contains(LogicalKeyboardKey.shiftRight);
 
   Vector2 get inputDirection {
     final d = Vector2.zero();
@@ -212,19 +305,14 @@ class VillageGame extends FlameGame with KeyboardEvents {
     _keys
       ..clear()
       ..addAll(keysPressed);
-    if (event is! KeyDownEvent) return KeyEventResult.handled;
+    if (event is! KeyDownEvent || !inPlay) return KeyEventResult.handled;
     final k = event.logicalKey;
     if (k == LogicalKeyboardKey.escape) {
       if (panelOpen) closePanel();
     } else if (k == LogicalKeyboardKey.keyI) {
       panelOpen ? closePanel() : openPanel('inventory');
     } else if (k == LogicalKeyboardKey.keyQ) {
-      if (panelOpen) {
-        closePanel();
-      } else {
-        questAtNpc = false;
-        openPanel('quests');
-      }
+      panelOpen ? closePanel() : openPanel('quests');
     } else if (panelOpen) {
       return KeyEventResult.handled;
     } else if (k == LogicalKeyboardKey.space || k == LogicalKeyboardKey.keyJ) {
@@ -236,14 +324,12 @@ class VillageGame extends FlameGame with KeyboardEvents {
     } else if (k == LogicalKeyboardKey.digit3 ||
         k == LogicalKeyboardKey.keyF) {
       player.useSkill(3);
-    } else if (k == LogicalKeyboardKey.keyC) {
-      switchCharacter();
-    } else if (k == LogicalKeyboardKey.keyM) {
-      nextBackground();
+    } else if (k == LogicalKeyboardKey.keyR) {
+      player.toggleRun();
+    } else if (k == LogicalKeyboardKey.keyX) {
+      player.jump();
     } else if (k == LogicalKeyboardKey.keyH) {
       quickPotion();
-    } else if (k == LogicalKeyboardKey.keyE) {
-      talkToNpc();
     }
     return KeyEventResult.handled;
   }
@@ -270,7 +356,7 @@ class Background extends Component with HasGameReference<VillageGame> {
     _image = image;
   }
 
-  Future<void> next() => _load((index + 1) % backgroundFiles.length);
+  Future<void> setIndex(int i) => _load(i);
 
   @override
   void render(Canvas canvas) {
@@ -284,25 +370,23 @@ class Background extends Component with HasGameReference<VillageGame> {
   }
 }
 
-/// Round on-screen button for a skill slot, with cooldown pie and key hint.
-class SkillButton extends PositionComponent
-    with HasGameReference<VillageGame>, TapCallbacks {
-  SkillButton(this.slot, this.radius, Vector2 pos)
+/// Round on-screen button (skill or support) with cooldown pie and key hint.
+class ActionButton extends PositionComponent with TapCallbacks {
+  ActionButton(this.label, this.keyHint, this.color, this.radius, Vector2 pos,
+      this.onPress,
+      {this.cooldown, this.active, this.title})
       : super(
             position: pos,
             size: Vector2.all(radius * 2),
-            anchor: Anchor.bottomRight);
+            anchor: Anchor.center);
 
-  final int slot;
+  final String label, keyHint;
+  final Color color;
   final double radius;
-
-  static const _keys = ['Space', '1', '2', '3'];
-  static const _colors = [
-    Color(0xFFE53935),
-    Color(0xFF1E88E5),
-    Color(0xFF7E57C2),
-    Color(0xFF43A047),
-  ];
+  final VoidCallback onPress;
+  final double Function()? cooldown;
+  final bool Function()? active;
+  final String Function()? title;
 
   final _label = TextPaint(
       style: const TextStyle(
@@ -312,33 +396,77 @@ class SkillButton extends PositionComponent
           shadows: [Shadow(blurRadius: 2)]));
 
   @override
-  void onTapDown(TapDownEvent event) => game.player.useSkill(slot);
+  void onTapDown(TapDownEvent event) => onPress();
 
   @override
   void render(Canvas canvas) {
-    final p = game.player;
     final c = Offset(radius, radius);
-    final ready = p.cooldownFraction(slot) <= 0;
-    canvas.drawCircle(c, radius, Paint()..color = _colors[slot]);
+    final cd = cooldown?.call() ?? 0;
+    final on = active?.call() ?? false;
+    canvas.drawCircle(c, radius, Paint()..color = color.withValues(alpha: .85));
     canvas.drawCircle(
         c,
         radius,
         Paint()
-          ..color = Colors.white54
+          ..color = on ? Colors.yellowAccent : Colors.white54
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 2);
-    if (!ready) {
+          ..strokeWidth = on ? 4 : 2);
+    if (cd > 0) {
       canvas.drawArc(
           Rect.fromCircle(center: c, radius: radius),
           -pi / 2,
-          2 * pi * p.cooldownFraction(slot),
+          2 * pi * cd,
           true,
           Paint()..color = Colors.black.withValues(alpha: .6));
     }
-    _label.render(canvas, p.skillName(slot), Vector2(radius, radius - 3),
+    _label.render(canvas, title?.call() ?? label, Vector2(radius, radius - 3),
         anchor: Anchor.center);
-    _label.render(canvas, '[${_keys[slot]}]', Vector2(radius, radius + 9),
+    _label.render(canvas, '[$keyHint]', Vector2(radius, radius + 9),
         anchor: Anchor.center);
+  }
+}
+
+/// Right-edge arrow that opens the next stage once the kill goal is met.
+class ExitArrow extends PositionComponent with HasGameReference<VillageGame> {
+  ExitArrow()
+      : super(
+            position: Vector2(740, 305),
+            size: Vector2(50, 60),
+            priority: 90000);
+
+  double _t = 0;
+
+  @override
+  void update(double dt) {
+    _t += dt;
+    if (game.portalOpen &&
+        game.inPlay &&
+        !game.player.dead &&
+        game.player.x > VillageGame.worldWidth - 55) {
+      game.nextStage();
+    }
+  }
+
+  @override
+  void render(Canvas canvas) {
+    if (!game.portalOpen) return;
+    final dx = sin(_t * 6) * 5;
+    final path = Path()
+      ..moveTo(0 + dx, 18)
+      ..lineTo(26 + dx, 18)
+      ..lineTo(26 + dx, 4)
+      ..lineTo(50 + dx, 30)
+      ..lineTo(26 + dx, 56)
+      ..lineTo(26 + dx, 42)
+      ..lineTo(0 + dx, 42)
+      ..close();
+    canvas.drawPath(path, Paint()..color = Colors.yellowAccent);
+    canvas.drawPath(
+        path,
+        Paint()
+          ..color = Colors.orange
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 3);
   }
 }
 
@@ -372,6 +500,8 @@ class CharAnims {
     'hurt': ('Hurt', .1, false),
     'skill1': ('Attack_2', .08, false),
     'shield': ('Shield', .12, true),
+    'jump': ('Jump', .08, false),
+    'dead': ('Dead', .14, false),
   };
 
   final String folder;
@@ -402,9 +532,9 @@ class CharAnims {
 
 class HeroDef {
   const HeroDef(this.name, this.folder, this.speed, this.dmgMul,
-      this.defBonus, this.skills);
+      this.defBonus, this.skills, this.blurb);
 
-  final String name, folder;
+  final String name, folder, blurb;
   final double speed, dmgMul;
   final int defBonus;
 
@@ -414,11 +544,14 @@ class HeroDef {
 
 const heroes = [
   HeroDef('Shinobi', 'Shinobi', 190, 1.0, 0,
-      ['Đánh', 'Chém nhanh', 'Vòng xoáy', 'Ẩn thân']),
+      ['Đánh', 'Chém nhanh', 'Vòng xoáy', 'Ẩn thân'],
+      'Nhanh nhẹn, di chuyển linh hoạt.'),
   HeroDef('Samurai', 'Samurai', 150, 1.25, 0,
-      ['Đánh', 'Trảm', 'Kiếm khí', 'Thủ thế']),
+      ['Đánh', 'Trảm', 'Kiếm khí', 'Thủ thế'],
+      'Sát thương cao, tốc độ vừa.'),
   HeroDef('Fighter', 'Fighter', 165, 1.1, 3,
-      ['Đánh', 'Đấm', 'Chấn động', 'Giáp sắt']),
+      ['Đánh', 'Đấm', 'Chấn động', 'Giáp sắt'],
+      'Trâu bò, giảm thêm sát thương nhận.'),
 ];
 
 class SkillDef {
@@ -442,18 +575,28 @@ class Player extends PositionComponent with HasGameReference<VillageGame> {
   Player() : super(size: Vector2.all(100), anchor: Anchor.bottomCenter);
 
   static const shieldTime = 2.5;
+  static const jumpTime = .6;
+  static const jumpCooldown = .9;
+  static const jumpHeight = 70.0;
+
   late final Map<String, CharAnims> _anims;
   int heroIndex = 0;
   final _cd = List<double>.filled(4, 0);
   double _swing = 0, _hurtCd = 0, _mpT = 0, _shield = 0;
+  double _jumpT = 0, _jumpCd = 0, _deadT = 0;
   SkillDef _active = skillDefs[0];
   bool facingRight = true;
   bool _moving = false;
+  bool running = false;
+  bool dead = false;
 
   GameState get s => game.state;
   HeroDef get hero => heroes[heroIndex];
   CharAnims get _anim => _anims[hero.folder]!;
   String skillName(int slot) => hero.skills[slot];
+  bool get shielded => _shield > 0;
+  bool get airborne => _jumpT > 0;
+  double get jumpCooldownFraction => (_jumpCd / jumpCooldown).clamp(0.0, 1.0);
   double cooldownFraction(int slot) =>
       (_cd[slot] / skillDefs[slot].cd).clamp(0.0, 1.0);
 
@@ -462,17 +605,37 @@ class Player extends PositionComponent with HasGameReference<VillageGame> {
         for (final h in heroes) h.folder: CharAnims(game, h.folder)
       };
 
-  void switchCharacter() {
-    heroIndex = (heroIndex + 1) % heroes.length;
+  /// Fresh start for a stage (also used to pick the hero).
+  void reset(int hero) {
+    heroIndex = hero;
+    dead = false;
+    _deadT = 0;
     _swing = 0;
     _shield = 0;
+    _hurtCd = 0;
+    _jumpT = 0;
+    _jumpCd = 0;
+    running = false;
+    facingRight = true;
     _cd.fillRange(0, _cd.length, 0);
-    game.world.add(FloatingText(
-        hero.name, position + Vector2(0, -100), Colors.cyanAccent));
+    position = VillageGame.playerStart.clone();
+    _anim.play('idle', restart: true);
+  }
+
+  void toggleRun() {
+    if (dead || !game.inPlay) return;
+    running = !running;
+  }
+
+  void jump() {
+    if (dead || !game.inPlay || _jumpT > 0 || _jumpCd > 0) return;
+    _jumpT = jumpTime;
+    _jumpCd = jumpCooldown;
+    _anim.play('jump', restart: true);
   }
 
   void useSkill(int slot) {
-    if (_cd[slot] > 0 || _swing > 0) return;
+    if (dead || !game.inPlay || _cd[slot] > 0 || _swing > 0) return;
     final d = skillDefs[slot];
     if (s.mp < d.mp) {
       game.world.add(
@@ -500,7 +663,7 @@ class Player extends PositionComponent with HasGameReference<VillageGame> {
   }
 
   void hurt(int dmg) {
-    if (_hurtCd > 0) return;
+    if (dead || _hurtCd > 0 || _jumpT > 0) return;
     _hurtCd = .8;
     final guarded = _shield > 0;
     final base = max(1, dmg - s.defense - hero.defBonus);
@@ -510,24 +673,36 @@ class Player extends PositionComponent with HasGameReference<VillageGame> {
     game.world.add(FloatingText(guarded ? 'Chặn -$real' : '-$real',
         position + Vector2(0, -90), guarded ? Colors.lightGreenAccent : Colors.red));
     if (s.hp == 0) {
-      s.hp = s.maxHp;
-      position = VillageGame.playerStart.clone();
-      game.world.add(FloatingText(
-          'Hồi sinh', position + Vector2(0, -90), Colors.white));
+      dead = true;
+      _deadT = 0;
+      _shield = 0;
+      _swing = 0;
+      _jumpT = 0;
+      _anim.play('dead', restart: true);
     }
+    s.touch();
   }
 
   @override
   void update(double dt) {
+    if (dead) {
+      _deadT += dt;
+      _anim.update(dt);
+      if (_deadT > 1.6) game.gameOver();
+      return;
+    }
     for (var i = 0; i < _cd.length; i++) {
       _cd[i] -= dt;
     }
     _swing -= dt;
     _hurtCd -= dt;
     _shield -= dt;
+    _jumpT -= dt;
+    _jumpCd -= dt;
     final dir = game.inputDirection;
     _moving = dir.length > .1;
-    position += dir * hero.speed * dt;
+    final run = running || game.shiftHeld;
+    position += dir * hero.speed * (run ? 1.0 : .55) * dt;
     position.x = position.x.clamp(30, VillageGame.worldWidth - 30);
     position.y =
         position.y.clamp(VillageGame.groundTop + 50, VillageGame.groundBottom);
@@ -540,12 +715,14 @@ class Player extends PositionComponent with HasGameReference<VillageGame> {
     }
     if (_swing > 0) {
       _anim.play(_active.anim);
+    } else if (_jumpT > 0) {
+      _anim.play('jump');
     } else if (_hurtCd > .5 && _shield <= 0) {
       _anim.play('hurt');
     } else if (_shield > 0) {
       _anim.play('shield');
     } else {
-      _anim.play(_moving ? 'run' : 'idle');
+      _anim.play(_moving ? (run ? 'run' : 'walk') : 'idle');
     }
     _anim.update(dt);
     priority = y.toInt();
@@ -555,6 +732,9 @@ class Player extends PositionComponent with HasGameReference<VillageGame> {
   void render(Canvas canvas) {
     canvas.drawOval(const Rect.fromLTWH(28, 90, 44, 12),
         Paint()..color = Colors.black26);
+    final lift = _jumpT > 0 ? sin(pi * (1 - _jumpT / jumpTime)) * jumpHeight : 0;
+    canvas.save();
+    canvas.translate(0, -lift.toDouble());
     _anim.render(canvas, size, flip: !facingRight);
     if (_shield > 0) {
       canvas.drawCircle(
@@ -573,55 +753,43 @@ class Player extends PositionComponent with HasGameReference<VillageGame> {
             ..style = PaintingStyle.stroke
             ..strokeWidth = 4);
     }
+    canvas.restore();
   }
 }
 
-enum MonsterKind { slime, fighter, samurai }
+enum MonsterKind { slime }
 
 class Monster extends PositionComponent with HasGameReference<VillageGame> {
-  Monster(this.kind)
-      : maxHp = kind == MonsterKind.slime ? 40 : 80,
-        super(
-            size: kind == MonsterKind.slime
-                ? Vector2(48, 48)
-                : Vector2.all(100),
-            anchor: Anchor.bottomCenter) {
+  Monster(this.kind, this.stage)
+      : maxHp = 40 + stage * 25,
+        super(size: Vector2(48, 48), anchor: Anchor.bottomCenter) {
     hp = maxHp;
   }
 
   final MonsterKind kind;
+  final int stage;
   final int maxHp;
   late int hp;
-  double _atkCd = 0, _wanderT = 0, _hurtT = 0, _atkAnim = 0;
+  double _atkCd = 0, _wanderT = 0;
   double _t = _rng.nextDouble() * 5;
-  bool _faceRight = true, _moving = false;
+  bool _faceRight = true;
   Vector2 _wander = Vector2.zero();
   late final List<Sprite> _frames;
-  CharAnims? _anim;
-
-  bool get human => kind != MonsterKind.slime;
 
   @override
   Future<void> onLoad() async {
-    if (human) {
-      _anim = CharAnims(
-          game, kind == MonsterKind.fighter ? 'Fighter' : 'Samurai');
-    } else {
-      _frames = [
-        for (var i = 0; i < 2; i++) game.sprite('monster.png', i * 16.0, 0, 16, 16)
-      ];
-    }
+    _frames = [
+      for (var i = 0; i < 2; i++) game.sprite('monster.png', i * 16.0, 0, 16, 16)
+    ];
   }
 
   void hurt(int dmg) {
     hp -= dmg;
-    _hurtT = .3;
-    _anim?.play('hurt', restart: true);
-    game.world.add(FloatingText(
-        '$dmg', position + Vector2(0, human ? -70 : -50), Colors.white));
+    game.world.add(
+        FloatingText('$dmg', position + Vector2(0, -50), Colors.white));
     position.x += (x > game.player.x ? 1 : -1) * 16;
     if (hp <= 0) {
-      if (game.state.gainExp(human ? 30 : 15)) {
+      if (game.state.gainExp(15)) {
         game.world.add(FloatingText('LEVEL UP!',
             game.player.position + Vector2(0, -110), Colors.yellow));
       }
@@ -634,24 +802,15 @@ class Monster extends PositionComponent with HasGameReference<VillageGame> {
   void update(double dt) {
     _t += dt;
     _atkCd -= dt;
-    _hurtT -= dt;
-    _atkAnim -= dt;
     final p = game.player;
     final to = p.position - position;
     final dist = to.length;
-    final speed = human ? 70.0 : 60.0;
-    _moving = false;
-    if (dist < 220) {
-      if (dist > 40) {
-        position += to.normalized() * speed * dt;
-        _moving = true;
-      }
+    if (dist < 220 && !p.dead) {
+      if (dist > 40) position += to.normalized() * 60 * dt;
       if (to.x.abs() > 4) _faceRight = to.x > 0;
       if (dist < 55 && _atkCd <= 0) {
         _atkCd = 1.2;
-        _atkAnim = .35;
-        _anim?.play('attack', restart: true);
-        p.hurt((human ? 16 : 10) + game.state.level * 2);
+        p.hurt(10 + game.state.level * 2 + stage * 3);
       }
     } else {
       _wanderT -= dt;
@@ -663,100 +822,30 @@ class Monster extends PositionComponent with HasGameReference<VillageGame> {
               ..normalize());
       }
       position += _wander * 28 * dt;
-      _moving = !_wander.isZero();
       if (_wander.x.abs() > .1) _faceRight = _wander.x > 0;
     }
     position.x = position.x.clamp(30, VillageGame.worldWidth - 30);
     position.y = position.y
         .clamp(VillageGame.groundTop + 40, VillageGame.groundBottom);
     priority = y.toInt();
-    final a = _anim;
-    if (a != null) {
-      if (_hurtT > 0) {
-        a.play('hurt');
-      } else if (_atkAnim > 0) {
-        a.play('attack');
-      } else {
-        a.play(_moving ? 'walk' : 'idle');
-      }
-      a.update(dt);
-    }
   }
 
   @override
   void render(Canvas canvas) {
-    final barY = human ? 28.0 : -6.0;
-    final barX = human ? 30.0 : 4.0;
-    final barW = 40.0;
-    if (human) {
-      canvas.drawOval(const Rect.fromLTWH(28, 90, 44, 12),
-          Paint()..color = Colors.black26);
-      _anim!.render(canvas, size, flip: !_faceRight);
-    } else {
-      canvas.drawOval(const Rect.fromLTWH(4, 40, 40, 8),
-          Paint()..color = Colors.black26);
-      canvas.save();
-      if (!_faceRight) {
-        canvas.translate(size.x, 0);
-        canvas.scale(-1, 1);
-      }
-      _frames[(_t * 2.5).floor() % 2]
-          .render(canvas, size: size, overridePaint: _pixel);
-      canvas.restore();
-    }
-    canvas.drawRect(Rect.fromLTWH(barX, barY, barW, 5),
-        Paint()..color = Colors.black54);
-    canvas.drawRect(Rect.fromLTWH(barX, barY, barW * hp / maxHp, 5),
-        Paint()..color = Colors.redAccent);
-  }
-}
-
-class Npc extends PositionComponent
-    with HasGameReference<VillageGame>, TapCallbacks {
-  Npc() : super(size: Vector2.all(100), anchor: Anchor.bottomCenter);
-
-  late final CharAnims _anim;
-  double _t = 0;
-
-  final _name = TextPaint(
-      style: const TextStyle(
-          color: Colors.white,
-          fontSize: 12,
-          fontWeight: FontWeight.bold,
-          shadows: [Shadow(blurRadius: 3)]));
-  final _mark = TextPaint(
-      style: const TextStyle(
-          color: Color(0xFFFFD54F),
-          fontSize: 26,
-          fontWeight: FontWeight.w900,
-          shadows: [Shadow(blurRadius: 3)]));
-
-  @override
-  Future<void> onLoad() async {
-    _anim = CharAnims(game, 'Samurai');
-    priority = y.toInt();
-  }
-
-  @override
-  void update(double dt) {
-    _t += dt;
-    _anim.update(dt);
-  }
-
-  @override
-  void onTapDown(TapDownEvent event) => game.talkToNpc();
-
-  @override
-  void render(Canvas canvas) {
-    canvas.drawOval(const Rect.fromLTWH(28, 90, 44, 12),
+    canvas.drawOval(const Rect.fromLTWH(4, 40, 40, 8),
         Paint()..color = Colors.black26);
-    _anim.render(canvas, size, flip: game.player.x < x);
-    _name.render(canvas, 'Làng trưởng', Vector2(size.x / 2, 30),
-        anchor: Anchor.bottomCenter);
-    if (game.state.hasQuestAttention) {
-      _mark.render(canvas, '!', Vector2(size.x / 2, 12 + sin(_t * 5) * 3),
-          anchor: Anchor.bottomCenter);
+    canvas.save();
+    if (!_faceRight) {
+      canvas.translate(size.x, 0);
+      canvas.scale(-1, 1);
     }
+    _frames[(_t * 2.5).floor() % 2]
+        .render(canvas, size: size, overridePaint: _pixel);
+    canvas.restore();
+    canvas.drawRect(
+        const Rect.fromLTWH(4, -6, 40, 5), Paint()..color = Colors.black54);
+    canvas.drawRect(Rect.fromLTWH(4, -6, 40 * hp / maxHp, 5),
+        Paint()..color = Colors.redAccent);
   }
 }
 
@@ -777,7 +866,8 @@ class Drop extends PositionComponent with HasGameReference<VillageGame> {
     _life -= dt;
     if (_life <= 0) removeFromParent();
     priority = y.toInt();
-    if (position.distanceTo(game.player.position) < 36) {
+    if (!game.player.dead &&
+        position.distanceTo(game.player.position) < 36) {
       if (game.state.addItem(id)) {
         game.world.add(FloatingText('+${itemDefs[id]!.name}',
             position + Vector2(0, -30), const Color(0xFF80DEEA)));
@@ -845,10 +935,12 @@ class Hud extends PositionComponent with HasGameReference<VillageGame> {
     _bar(canvas, 18, 32, p.hp / p.maxHp, Colors.red, '${p.hp}/${p.maxHp}');
     _bar(canvas, 18, 50, p.mp / p.maxMp, Colors.blue, '${p.mp}/${p.maxMp}');
     _text.render(canvas, 'Vàng: ${p.gold}', Vector2(18, 72));
-    _text.render(canvas, 'Nhân vật: ${game.player.hero.name} [C]',
+    _text.render(canvas, 'Nhân vật: ${game.player.hero.name}',
         Vector2(18, 90));
     _text.render(
-        canvas, 'Map: ${game.background.name} [M]', Vector2(18, 108));
+        canvas,
+        'Màn ${game.stage + 1}: ${game.stageKills}/${VillageGame.killGoal} quái',
+        Vector2(18, 108));
   }
 
   void _bar(Canvas c, double x, double y, double f, Color col, String t) {

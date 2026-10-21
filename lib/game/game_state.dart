@@ -89,7 +89,29 @@ class GameState extends ChangeNotifier {
   Slot weapon = Slot(ItemId.woodSword);
   Slot armor = Slot(ItemId.clothArmor);
 
-  final List<Quest> quests = [
+  /// Back to a brand new character (used when a run restarts).
+  void reset() {
+    level = 1;
+    exp = 0;
+    maxHp = 100;
+    hp = 100;
+    maxMp = 50;
+    mp = 50;
+    gold = 0;
+    bag
+      ..clear()
+      ..add(Slot(ItemId.potion, 3));
+    weapon = Slot(ItemId.woodSword);
+    armor = Slot(ItemId.clothArmor);
+    quests
+      ..clear()
+      ..addAll(_newQuests());
+    notifyListeners();
+  }
+
+  late final List<Quest> quests = _newQuests();
+
+  static List<Quest> _newQuests() => [
     Quest('Diệt quái', 'Tiêu diệt 5 con quái quanh làng.', 5,
         rewardGold: 100, rewardExp: 60, rewardItem: ItemId.potion, rewardCount: 2),
     Quest('Thu thập thạch', 'Mang cho ta 6 Thạch slime.', 6,

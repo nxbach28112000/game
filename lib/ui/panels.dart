@@ -48,15 +48,11 @@ class HudButtons extends StatelessWidget {
         listenable: game.state,
         builder: (context, _) => Row(
           children: [
-            _btn('Đổi nhân vật (C)', game.switchCharacter),
-            _btn('Đổi map (M)', game.nextBackground),
             _btn('Bình máu (H) x${game.state.countOf(ItemId.potion)}',
                 game.quickPotion),
             _btn('Túi đồ (I)', () => game.openPanel('inventory')),
-            _btn('Nhiệm vụ (Q)${game.state.hasQuestAttention ? ' !' : ''}', () {
-              game.questAtNpc = false;
-              game.openPanel('quests');
-            }),
+            _btn('Nhiệm vụ (Q)${game.state.hasQuestAttention ? ' !' : ''}',
+                () => game.openPanel('quests')),
           ],
         ),
       ),
@@ -315,29 +311,15 @@ class _QuestPanelState extends State<QuestPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final atNpc = widget.game.questAtNpc;
+    const atNpc = true; // no village chief any more: accept/claim anywhere
     return ListenableBuilder(
       listenable: s,
       builder: (context, _) => _PanelFrame(
-        title: atNpc ? 'Làng trưởng' : 'Nhiệm vụ',
+        title: 'Nhiệm vụ',
         onClose: widget.game.closePanel,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (atNpc)
-              const Padding(
-                padding: EdgeInsets.only(bottom: 10),
-                child: Text(
-                    'Chào chiến binh! Slime đang quấy phá làng ta, '
-                    'hãy giúp ta một tay nhé.',
-                    style: TextStyle(fontStyle: FontStyle.italic)),
-              )
-            else
-              const Padding(
-                padding: EdgeInsets.only(bottom: 10),
-                child: Text('Đến gặp Làng trưởng để nhận và trả nhiệm vụ.',
-                    style: TextStyle(color: Colors.white70)),
-              ),
             for (final q in s.quests) _quest(q, atNpc),
             if (_message.isNotEmpty)
               Padding(
@@ -392,6 +374,170 @@ class _QuestPanelState extends State<QuestPanel> {
                   child: const Text('Trả nhiệm vụ')),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// Paints the first frame of a hero's Idle sheet (128px frames).
+class _HeroPainter extends CustomPainter {
+  _HeroPainter(this.image);
+
+  final ui.Image image;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawImageRect(
+        image,
+        const Rect.fromLTWH(0, 0, 128, 128),
+        Offset.zero & size,
+        Paint()..filterQuality = FilterQuality.none);
+  }
+
+  @override
+  bool shouldRepaint(_HeroPainter old) => old.image != image;
+}
+
+class CharacterSelect extends StatefulWidget {
+  const CharacterSelect({super.key, required this.game});
+
+  final VillageGame game;
+
+  @override
+  State<CharacterSelect> createState() => _CharacterSelectState();
+}
+
+class _CharacterSelectState extends State<CharacterSelect> {
+  int _picked = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _picked = widget.game.selectedHero;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xF2101626),
+      child: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(12),
+          child: DefaultTextStyle(
+            style: const TextStyle(color: Colors.white, fontSize: 14),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('CHỌN NHÂN VẬT',
+                    style: TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.bold,
+                        color: _gold)),
+                const SizedBox(height: 14),
+                Wrap(
+                  spacing: 14,
+                  runSpacing: 14,
+                  alignment: WrapAlignment.center,
+                  children: [
+                    for (var i = 0; i < heroes.length; i++) _card(i),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                FilledButton(
+                  style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF2E7D32),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 36, vertical: 14)),
+                  onPressed: () => widget.game.startGame(_picked),
+                  child: Text('Vào game: ${heroes[_picked].name}',
+                      style: const TextStyle(fontSize: 16)),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _card(int i) {
+    final h = heroes[i];
+    final sel = i == _picked;
+    final image = widget.game.images.fromCache('${h.folder}/Idle.png');
+    return GestureDetector(
+      onTap: () => setState(() => _picked = i),
+      child: Container(
+        width: 170,
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: sel ? const Color(0xFF2A3558) : _panelColor,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: sel ? _gold : Colors.white24, width: 3),
+        ),
+        child: Column(
+          children: [
+            SizedBox(
+                width: 120,
+                height: 120,
+                child: CustomPaint(painter: _HeroPainter(image))),
+            Text(h.name,
+                style: const TextStyle(
+                    fontSize: 18, fontWeight: FontWeight.bold, color: _gold)),
+            const SizedBox(height: 4),
+            Text(h.blurb,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white70, fontSize: 12)),
+            const SizedBox(height: 6),
+            Text('Tốc độ ${h.speed.round()}  •  Sát thương x${h.dmgMul}'
+                '${h.defBonus > 0 ? '  •  Giáp +${h.defBonus}' : ''}',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 11)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class GameOverScreen extends StatelessWidget {
+  const GameOverScreen({super.key, required this.game});
+
+  final VillageGame game;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.grey.withValues(alpha: .8),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('GAME OVER',
+                style: TextStyle(
+                    fontSize: 48,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.white,
+                    letterSpacing: 4,
+                    shadows: [Shadow(blurRadius: 8)])),
+            const SizedBox(height: 6),
+            Text('Màn ${game.stage + 1} • Lv ${game.state.level}',
+                style: const TextStyle(color: Colors.white, fontSize: 16)),
+            const SizedBox(height: 22),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FilledButton(
+                    onPressed: game.restart, child: const Text('Chơi lại')),
+                const SizedBox(width: 12),
+                FilledButton(
+                    style: FilledButton.styleFrom(
+                        backgroundColor: Colors.blueGrey.shade700),
+                    onPressed: game.openSelect,
+                    child: const Text('Chọn nhân vật')),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

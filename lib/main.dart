@@ -24,8 +24,10 @@ class _GameScreenState extends State<GameScreen> {
   @override
   Widget build(BuildContext context) => GameWidget<VillageGame>(
         game: game,
-        initialActiveOverlays: const ['hud'],
+        initialActiveOverlays: const ['select'],
         overlayBuilderMap: {
+          'select': (context, g) => CharacterSelect(game: g),
+          'gameover': (context, g) => GameOverScreen(game: g),
           'hud': (context, g) => HudButtons(game: g),
           'inventory': (context, g) => InventoryPanel(game: g),
           'quests': (context, g) => QuestPanel(game: g),
