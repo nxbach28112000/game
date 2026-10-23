@@ -27,10 +27,7 @@ const backgroundFiles = <(String, String)>[
 
 /// Offline prototype: stages of slimes, a selectable hero, loot, quests.
 class VillageGame extends FlameGame with KeyboardEvents {
-  VillageGame()
-      : super(
-            camera: CameraComponent.withFixedResolution(
-                width: 800, height: 450));
+  VillageGame() : super(camera: CameraComponent.withFixedResolution(width: 800, height: 450));
 
   static const double worldWidth = 800;
   static const double worldHeight = 450;
@@ -44,6 +41,7 @@ class VillageGame extends FlameGame with KeyboardEvents {
   final GameState state = GameState();
   late final Player player;
   late final Background background;
+  late FlyPlatform platform;
   late final JoystickComponent joystick;
   final List<Monster> monsters = [];
   final Set<LogicalKeyboardKey> _keys = {};
@@ -60,12 +58,9 @@ class VillageGame extends FlameGame with KeyboardEvents {
   @override
   Color backgroundColor() => Colors.black;
 
-  Sprite sprite(String file,
-      [double x = 0, double y = 0, double? w, double? h]) {
+  Sprite sprite(String file, [double x = 0, double y = 0, double? w, double? h]) {
     final image = images.fromCache(file);
-    return Sprite(image,
-        srcPosition: Vector2(x, y),
-        srcSize: Vector2(w ?? image.width.toDouble(), h ?? image.height.toDouble()));
+    return Sprite(image, srcPosition: Vector2(x, y), srcSize: Vector2(w ?? image.width.toDouble(), h ?? image.height.toDouble()));
   }
 
   Sprite itemSprite(ItemId id) => sprite('${itemDefs[id]!.icon}.png');
@@ -86,43 +81,53 @@ class VillageGame extends FlameGame with KeyboardEvents {
     background = Background();
     world.add(background);
     world.add(ExitArrow());
+    platform = FlyPlatform(430, 320);
+    world.add(platform);
     player = Player()..position = playerStart.clone();
     world.add(player);
 
     joystick = JoystickComponent(
-      knob: CircleComponent(
-          radius: 22,
-          paint: Paint()..color = Colors.white.withValues(alpha: .8)),
-      background: CircleComponent(
-          radius: 50,
-          paint: Paint()..color = Colors.black.withValues(alpha: .35)),
+      knob: CircleComponent(radius: 22, paint: Paint()..color = Colors.white.withValues(alpha: .8)),
+      background: CircleComponent(radius: 50, paint: Paint()..color = Colors.black.withValues(alpha: .35)),
       margin: const EdgeInsets.only(left: 36, bottom: 36),
     );
     camera.viewport.addAll([
       joystick,
       // Attack 1 (basic), then the two skills (attack 2 / attack 3).
-      ActionButton('Đánh', 'J', const Color(0xFFE53935), 36, Vector2(745, 385),
-          () => player.useSkill(0),
-          cooldown: () => player.cooldownFraction(0)),
-      ActionButton('', 'K', const Color(0xFF1E88E5), 28, Vector2(662, 405),
-          () => player.useSkill(1),
-          cooldown: () => player.cooldownFraction(1),
-          title: () => player.skillName(1)),
-      ActionButton('', 'L', const Color(0xFF7E57C2), 28, Vector2(692, 325),
-          () => player.useSkill(2),
-          cooldown: () => player.cooldownFraction(2),
-          title: () => player.skillName(2)),
+      ActionButton('Đánh', 'J', const Color(0xFFE53935), 36, Vector2(745, 385), () => player.useSkill(0), cooldown: () => player.cooldownFraction(0)),
+      ActionButton(
+        '',
+        'K',
+        const Color(0xFF1E88E5),
+        28,
+        Vector2(662, 405),
+        () => player.useSkill(1),
+        cooldown: () => player.cooldownFraction(1),
+        title: () => player.skillName(1),
+      ),
+      ActionButton(
+        '',
+        'L',
+        const Color(0xFF7E57C2),
+        28,
+        Vector2(692, 325),
+        () => player.useSkill(2),
+        cooldown: () => player.cooldownFraction(2),
+        title: () => player.skillName(2),
+      ),
       // Support buttons: run, shield, jump.
-      ActionButton('Chạy', 'Shift', const Color(0xFFF9A825), 22,
-          Vector2(598, 424), () => player.toggleRun(),
-          active: () => player.running),
-      ActionButton('Khiên', 'F', const Color(0xFF43A047), 22,
-          Vector2(578, 372), () => player.useSkill(3),
-          cooldown: () => player.cooldownFraction(3),
-          active: () => player.shielded),
-      ActionButton('Nhảy', 'X', const Color(0xFF00ACC1), 22, Vector2(612, 322),
-          () => player.jump(),
-          cooldown: () => player.jumpCooldownFraction),
+      ActionButton('Chạy', 'Shift', const Color(0xFFF9A825), 22, Vector2(598, 424), () => player.toggleRun(), active: () => player.running),
+      ActionButton(
+        'Khiên',
+        'F',
+        const Color(0xFF43A047),
+        22,
+        Vector2(578, 372),
+        () => player.useSkill(3),
+        cooldown: () => player.cooldownFraction(3),
+        active: () => player.shielded,
+      ),
+      ActionButton('Nhảy', 'X', const Color(0xFF00ACC1), 22, Vector2(612, 322), () => player.jump(), cooldown: () => player.jumpCooldownFraction),
       Hud(),
     ]);
     pauseEngine(); // wait on the character select overlay
@@ -168,9 +173,16 @@ class VillageGame extends FlameGame with KeyboardEvents {
       d.removeFromParent();
     }
     stageKills = 0;
+    platform.removeFromParent();
+    final spot = FlyPlatform.spots[stage % FlyPlatform.spots.length];
+    platform = FlyPlatform(spot.$1, spot.$2);
+    world.add(platform);
     player.reset(selectedHero);
     for (var i = 0; i < 7; i++) {
       _spawnMonster();
+    }
+    for (var i = 0; i < 2; i++) {
+      _spawnMonster(onPlatform: true);
     }
   }
 
@@ -183,8 +195,7 @@ class VillageGame extends FlameGame with KeyboardEvents {
     _beginStage();
     state.hp = min(state.maxHp, max(keepHp, state.maxHp ~/ 2));
     state.touch();
-    world.add(
-        FloatingText('Màn ${stage + 1}', Vector2(400, 150), Colors.yellow));
+    world.add(FloatingText('Màn ${stage + 1}', Vector2(400, 150), Colors.yellow));
     _changingStage = false;
   }
 
@@ -202,11 +213,11 @@ class VillageGame extends FlameGame with KeyboardEvents {
     pauseEngine();
   }
 
-  void _spawnMonster() {
-    final m = Monster(MonsterKind.slime, stage)
-      ..position = Vector2(
-          250 + _rng.nextDouble() * (worldWidth - 340),
-          groundTop + 60 + _rng.nextDouble() * (groundBottom - groundTop - 70));
+  void _spawnMonster({bool onPlatform = false}) {
+    final m = Monster(MonsterKind.slime, stage, onPlatform: onPlatform)
+      ..position = onPlatform
+          ? Vector2(platform.left + 20 + _rng.nextDouble() * (FlyPlatform.slabWidth - 40), platform.y)
+          : Vector2(250 + _rng.nextDouble() * (worldWidth - 340), groundTop + 60 + _rng.nextDouble() * (groundBottom - groundTop - 70));
     monsters.add(m);
     world.add(m);
   }
@@ -217,19 +228,16 @@ class VillageGame extends FlameGame with KeyboardEvents {
     if (stageKills < killGoal) {
       stageKills++;
       if (portalOpen) {
-        world.add(FloatingText('Hoàn thành màn! Đi sang phải →',
-            Vector2(400, 150), Colors.yellow));
+        world.add(FloatingText('Hoàn thành màn! Đi sang phải →', Vector2(400, 150), Colors.yellow));
       }
     }
     state.touch();
     final gold = 5 + _rng.nextInt(11) + stage * 3;
     state.gold += gold;
-    world.add(FloatingText('+$gold vàng', m.position + Vector2(0, -50),
-        const Color(0xFFFFD54F)));
+    world.add(FloatingText('+$gold vàng', m.position + Vector2(0, -50), const Color(0xFFFFD54F)));
     void drop(ItemId id, double chance) {
       if (_rng.nextDouble() < chance) {
-        world.add(Drop(id)
-          ..position = m.position + Vector2(_rng.nextDouble() * 30 - 15, 0));
+        world.add(Drop(id)..position = m.position + Vector2(_rng.nextDouble() * 30 - 15, 0));
       }
     }
 
@@ -239,7 +247,7 @@ class VillageGame extends FlameGame with KeyboardEvents {
     final spawnStage = stage;
     Future.delayed(const Duration(seconds: 3), () {
       if (isMounted && inPlay && spawnStage == stage && !portalOpen) {
-        _spawnMonster();
+        _spawnMonster(onPlatform: m.onPlatform);
       }
     });
   }
@@ -260,40 +268,31 @@ class VillageGame extends FlameGame with KeyboardEvents {
     if (inPlay) resumeEngine();
   }
 
-  bool get panelOpen =>
-      overlays.isActive('inventory') || overlays.isActive('quests');
+  bool get panelOpen => overlays.isActive('inventory') || overlays.isActive('quests');
 
   void quickPotion() {
     if (!inPlay || player.dead) return;
     if (!state.usePotion()) {
-      world.add(FloatingText('Không dùng được',
-          player.position + Vector2(0, -90), Colors.white));
+      world.add(FloatingText('Không dùng được', player.position + Vector2(0, -90), Colors.white));
     } else {
-      world.add(FloatingText(
-          '+HP', player.position + Vector2(0, -90), Colors.greenAccent));
+      world.add(FloatingText('+HP', player.position + Vector2(0, -90), Colors.greenAccent));
     }
   }
 
-  bool get shiftHeld =>
-      _keys.contains(LogicalKeyboardKey.shiftLeft) ||
-      _keys.contains(LogicalKeyboardKey.shiftRight);
+  bool get shiftHeld => _keys.contains(LogicalKeyboardKey.shiftLeft) || _keys.contains(LogicalKeyboardKey.shiftRight);
 
   Vector2 get inputDirection {
     final d = Vector2.zero();
-    if (_keys.contains(LogicalKeyboardKey.keyA) ||
-        _keys.contains(LogicalKeyboardKey.arrowLeft)) {
+    if (_keys.contains(LogicalKeyboardKey.keyA) || _keys.contains(LogicalKeyboardKey.arrowLeft)) {
       d.x -= 1;
     }
-    if (_keys.contains(LogicalKeyboardKey.keyD) ||
-        _keys.contains(LogicalKeyboardKey.arrowRight)) {
+    if (_keys.contains(LogicalKeyboardKey.keyD) || _keys.contains(LogicalKeyboardKey.arrowRight)) {
       d.x += 1;
     }
-    if (_keys.contains(LogicalKeyboardKey.keyW) ||
-        _keys.contains(LogicalKeyboardKey.arrowUp)) {
+    if (_keys.contains(LogicalKeyboardKey.keyW) || _keys.contains(LogicalKeyboardKey.arrowUp)) {
       d.y -= 1;
     }
-    if (_keys.contains(LogicalKeyboardKey.keyS) ||
-        _keys.contains(LogicalKeyboardKey.arrowDown)) {
+    if (_keys.contains(LogicalKeyboardKey.keyS) || _keys.contains(LogicalKeyboardKey.arrowDown)) {
       d.y += 1;
     }
     if (d.isZero()) return joystick.relativeDelta.clone();
@@ -321,8 +320,7 @@ class VillageGame extends FlameGame with KeyboardEvents {
       player.useSkill(1);
     } else if (k == LogicalKeyboardKey.digit2 || k == LogicalKeyboardKey.keyL) {
       player.useSkill(2);
-    } else if (k == LogicalKeyboardKey.digit3 ||
-        k == LogicalKeyboardKey.keyF) {
+    } else if (k == LogicalKeyboardKey.digit3 || k == LogicalKeyboardKey.keyF) {
       player.useSkill(3);
     } else if (k == LogicalKeyboardKey.keyR) {
       player.toggleRun();
@@ -363,22 +361,18 @@ class Background extends Component with HasGameReference<VillageGame> {
     final img = _image;
     if (img == null) return;
     canvas.drawImageRect(
-        img,
-        Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble()),
-        const Rect.fromLTWH(0, 0, VillageGame.worldWidth, VillageGame.worldHeight),
-        _paint);
+      img,
+      Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble()),
+      const Rect.fromLTWH(0, 0, VillageGame.worldWidth, VillageGame.worldHeight),
+      _paint,
+    );
   }
 }
 
 /// Round on-screen button (skill or support) with cooldown pie and key hint.
 class ActionButton extends PositionComponent with TapCallbacks {
-  ActionButton(this.label, this.keyHint, this.color, this.radius, Vector2 pos,
-      this.onPress,
-      {this.cooldown, this.active, this.title})
-      : super(
-            position: pos,
-            size: Vector2.all(radius * 2),
-            anchor: Anchor.center);
+  ActionButton(this.label, this.keyHint, this.color, this.radius, Vector2 pos, this.onPress, {this.cooldown, this.active, this.title})
+    : super(position: pos, size: Vector2.all(radius * 2), anchor: Anchor.center);
 
   final String label, keyHint;
   final Color color;
@@ -389,11 +383,8 @@ class ActionButton extends PositionComponent with TapCallbacks {
   final String Function()? title;
 
   final _label = TextPaint(
-      style: const TextStyle(
-          color: Colors.white,
-          fontSize: 10,
-          fontWeight: FontWeight.bold,
-          shadows: [Shadow(blurRadius: 2)]));
+    style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, shadows: [Shadow(blurRadius: 2)]),
+  );
 
   @override
   void onTapDown(TapDownEvent event) => onPress();
@@ -405,44 +396,31 @@ class ActionButton extends PositionComponent with TapCallbacks {
     final on = active?.call() ?? false;
     canvas.drawCircle(c, radius, Paint()..color = color.withValues(alpha: .85));
     canvas.drawCircle(
-        c,
-        radius,
-        Paint()
-          ..color = on ? Colors.yellowAccent : Colors.white54
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = on ? 4 : 2);
+      c,
+      radius,
+      Paint()
+        ..color = on ? Colors.yellowAccent : Colors.white54
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = on ? 4 : 2,
+    );
     if (cd > 0) {
-      canvas.drawArc(
-          Rect.fromCircle(center: c, radius: radius),
-          -pi / 2,
-          2 * pi * cd,
-          true,
-          Paint()..color = Colors.black.withValues(alpha: .6));
+      canvas.drawArc(Rect.fromCircle(center: c, radius: radius), -pi / 2, 2 * pi * cd, true, Paint()..color = Colors.black.withValues(alpha: .6));
     }
-    _label.render(canvas, title?.call() ?? label, Vector2(radius, radius - 3),
-        anchor: Anchor.center);
-    _label.render(canvas, '[$keyHint]', Vector2(radius, radius + 9),
-        anchor: Anchor.center);
+    _label.render(canvas, title?.call() ?? label, Vector2(radius, radius - 3), anchor: Anchor.center);
+    _label.render(canvas, '[$keyHint]', Vector2(radius, radius + 9), anchor: Anchor.center);
   }
 }
 
 /// Right-edge arrow that opens the next stage once the kill goal is met.
 class ExitArrow extends PositionComponent with HasGameReference<VillageGame> {
-  ExitArrow()
-      : super(
-            position: Vector2(740, 305),
-            size: Vector2(50, 60),
-            priority: 90000);
+  ExitArrow() : super(position: Vector2(740, 305), size: Vector2(50, 60), priority: 90000);
 
   double _t = 0;
 
   @override
   void update(double dt) {
     _t += dt;
-    if (game.portalOpen &&
-        game.inPlay &&
-        !game.player.dead &&
-        game.player.x > VillageGame.worldWidth - 55) {
+    if (game.portalOpen && game.inPlay && !game.player.dead && game.player.x > VillageGame.worldWidth - 55) {
       game.nextStage();
     }
   }
@@ -462,11 +440,12 @@ class ExitArrow extends PositionComponent with HasGameReference<VillageGame> {
       ..close();
     canvas.drawPath(path, Paint()..color = Colors.yellowAccent);
     canvas.drawPath(
-        path,
-        Paint()
-          ..color = Colors.orange
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 3);
+      path,
+      Paint()
+        ..color = Colors.orange
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3,
+    );
   }
 }
 
@@ -477,18 +456,13 @@ class CharAnims {
       final image = game.images.fromCache('$folder/${e.value.$1}.png');
       final anim = SpriteAnimation.fromFrameData(
         image,
-        SpriteAnimationData.sequenced(
-          amount: image.width ~/ 128,
-          stepTime: e.value.$2,
-          textureSize: Vector2.all(128),
-          loop: e.value.$3,
-        ),
+        SpriteAnimationData.sequenced(amount: image.width ~/ 128, stepTime: e.value.$2, textureSize: Vector2.all(128), loop: e.value.$3),
       );
       _tickers[e.key] = anim.createTicker();
     }
   }
 
-  static const folders = ['Fighter', 'Samurai', 'Shinobi'];
+  static const folders = ['Fighter', 'Samurai', 'Shinobi', 'Ronin'];
 
   /// name -> (file, seconds per frame, loops)
   static const specs = <String, (String, double, bool)>{
@@ -523,16 +497,13 @@ class CharAnims {
       canvas.translate(size.x, 0);
       canvas.scale(-1, 1);
     }
-    _tickers[_cur]!
-        .getSprite()
-        .render(canvas, size: size, overridePaint: _pixel);
+    _tickers[_cur]!.getSprite().render(canvas, size: size, overridePaint: _pixel);
     canvas.restore();
   }
 }
 
 class HeroDef {
-  const HeroDef(this.name, this.folder, this.speed, this.dmgMul,
-      this.defBonus, this.skills, this.blurb);
+  const HeroDef(this.name, this.folder, this.speed, this.dmgMul, this.defBonus, this.skills, this.blurb);
 
   final String name, folder, blurb;
   final double speed, dmgMul;
@@ -543,20 +514,14 @@ class HeroDef {
 }
 
 const heroes = [
-  HeroDef('Shinobi', 'Shinobi', 190, 1.0, 0,
-      ['Đánh', 'Chém nhanh', 'Vòng xoáy', 'Ẩn thân'],
-      'Nhanh nhẹn, di chuyển linh hoạt.'),
-  HeroDef('Samurai', 'Samurai', 150, 1.25, 0,
-      ['Đánh', 'Trảm', 'Kiếm khí', 'Thủ thế'],
-      'Sát thương cao, tốc độ vừa.'),
-  HeroDef('Fighter', 'Fighter', 165, 1.1, 3,
-      ['Đánh', 'Đấm', 'Chấn động', 'Giáp sắt'],
-      'Trâu bò, giảm thêm sát thương nhận.'),
+  HeroDef('Shinobi', 'Shinobi', 190, 1.0, 0, ['Đánh', 'Chém nhanh', 'Vòng xoáy', 'Ẩn thân'], 'Nhanh nhẹn, di chuyển linh hoạt.'),
+  HeroDef('Samurai', 'Samurai', 150, 1.25, 0, ['Đánh', 'Trảm', 'Kiếm khí', 'Thủ thế'], 'Sát thương cao, tốc độ vừa.'),
+  HeroDef('Fighter', 'Fighter', 165, 1.1, 3, ['Đánh', 'Đấm', 'Chấn động', 'Giáp sắt'], 'Trâu bò, giảm thêm sát thương nhận.'),
+  HeroDef('Ronin', 'Ronin', 175, 1.2, 1, ['Đánh', 'Đâm', 'Vòng kiếm', 'Khiên'], 'Kiếm khách cân bằng, có khiên và đòn xoáy.'),
 ];
 
 class SkillDef {
-  const SkillDef(this.mp, this.cd, this.mult, this.reach, this.anim,
-      {this.aoe = false, this.dur = .35});
+  const SkillDef(this.mp, this.cd, this.mult, this.reach, this.anim, {this.aoe = false, this.dur = .35});
 
   final int mp;
   final double cd, mult, reach, dur;
@@ -575,15 +540,19 @@ class Player extends PositionComponent with HasGameReference<VillageGame> {
   Player() : super(size: Vector2.all(100), anchor: Anchor.bottomCenter);
 
   static const shieldTime = 2.5;
-  static const jumpTime = .6;
-  static const jumpCooldown = .9;
-  static const jumpHeight = 70.0;
+  static const jumpCooldown = .3;
+  static const jumpSpeed = 430.0;
+  static const gravity = 950.0;
 
   late final Map<String, CharAnims> _anims;
   int heroIndex = 0;
   final _cd = List<double>.filled(4, 0);
   double _swing = 0, _hurtCd = 0, _mpT = 0, _shield = 0;
-  double _jumpT = 0, _jumpCd = 0, _deadT = 0;
+  double _jumpCd = 0, _deadT = 0;
+
+  /// Height above the ground plane (the platform top is [FlyPlatform.topHeight]).
+  double z = 0, _vz = 0;
+  bool _grounded = true;
   SkillDef _active = skillDefs[0];
   bool facingRight = true;
   bool _moving = false;
@@ -595,15 +564,12 @@ class Player extends PositionComponent with HasGameReference<VillageGame> {
   CharAnims get _anim => _anims[hero.folder]!;
   String skillName(int slot) => hero.skills[slot];
   bool get shielded => _shield > 0;
-  bool get airborne => _jumpT > 0;
+  bool get airborne => !_grounded;
   double get jumpCooldownFraction => (_jumpCd / jumpCooldown).clamp(0.0, 1.0);
-  double cooldownFraction(int slot) =>
-      (_cd[slot] / skillDefs[slot].cd).clamp(0.0, 1.0);
+  double cooldownFraction(int slot) => (_cd[slot] / skillDefs[slot].cd).clamp(0.0, 1.0);
 
   @override
-  Future<void> onLoad() async => _anims = {
-        for (final h in heroes) h.folder: CharAnims(game, h.folder)
-      };
+  Future<void> onLoad() async => _anims = {for (final h in heroes) h.folder: CharAnims(game, h.folder)};
 
   /// Fresh start for a stage (also used to pick the hero).
   void reset(int hero) {
@@ -613,7 +579,9 @@ class Player extends PositionComponent with HasGameReference<VillageGame> {
     _swing = 0;
     _shield = 0;
     _hurtCd = 0;
-    _jumpT = 0;
+    z = 0;
+    _vz = 0;
+    _grounded = true;
     _jumpCd = 0;
     running = false;
     facingRight = true;
@@ -628,8 +596,9 @@ class Player extends PositionComponent with HasGameReference<VillageGame> {
   }
 
   void jump() {
-    if (dead || !game.inPlay || _jumpT > 0 || _jumpCd > 0) return;
-    _jumpT = jumpTime;
+    if (dead || !game.inPlay || !_grounded || _jumpCd > 0) return;
+    _grounded = false;
+    _vz = jumpSpeed;
     _jumpCd = jumpCooldown;
     _anim.play('jump', restart: true);
   }
@@ -638,16 +607,14 @@ class Player extends PositionComponent with HasGameReference<VillageGame> {
     if (dead || !game.inPlay || _cd[slot] > 0 || _swing > 0) return;
     final d = skillDefs[slot];
     if (s.mp < d.mp) {
-      game.world.add(
-          FloatingText('Hết MP', position + Vector2(0, -90), Colors.white));
+      game.world.add(FloatingText('Hết MP', position + Vector2(0, -90), Colors.white));
       return;
     }
     s.mp -= d.mp;
     _cd[slot] = d.cd;
     if (slot == 3) {
       _shield = shieldTime;
-      game.world.add(FloatingText(
-          hero.skills[3], position + Vector2(0, -90), Colors.lightGreenAccent));
+      game.world.add(FloatingText(hero.skills[3], position + Vector2(0, -90), Colors.lightGreenAccent));
       return;
     }
     _active = d;
@@ -656,28 +623,30 @@ class Player extends PositionComponent with HasGameReference<VillageGame> {
     for (final m in List<Monster>.from(game.monsters)) {
       final dx = m.x - x;
       final front = d.aoe || dx * (facingRight ? 1 : -1) > -10;
-      if (front && dx.abs() < d.reach && (m.y - y).abs() < (d.aoe ? 60 : 40)) {
+      if (front && dx.abs() < d.reach && (m.y - y).abs() < (d.aoe ? 60 : 40) && (m.z - z).abs() < 50) {
         m.hurt(((s.attack * hero.dmgMul + _rng.nextInt(4)) * d.mult).round());
       }
     }
   }
 
   void hurt(int dmg) {
-    if (dead || _hurtCd > 0 || _jumpT > 0) return;
+    // Mid-air jumps (not standing on a platform) dodge hits.
+    if (dead || _hurtCd > 0 || (!_grounded && _vz != 0)) return;
     _hurtCd = .8;
     final guarded = _shield > 0;
     final base = max(1, dmg - s.defense - hero.defBonus);
     final real = guarded ? max(1, (base * .2).round()) : base;
     s.hp = max(0, s.hp - real);
     if (!guarded) _anim.play('hurt', restart: true);
-    game.world.add(FloatingText(guarded ? 'Chặn -$real' : '-$real',
-        position + Vector2(0, -90), guarded ? Colors.lightGreenAccent : Colors.red));
+    game.world.add(FloatingText(guarded ? 'Chặn -$real' : '-$real', position + Vector2(0, -90), guarded ? Colors.lightGreenAccent : Colors.red));
     if (s.hp == 0) {
       dead = true;
       _deadT = 0;
       _shield = 0;
       _swing = 0;
-      _jumpT = 0;
+      z = 0;
+      _vz = 0;
+      _grounded = true;
       _anim.play('dead', restart: true);
     }
     s.touch();
@@ -697,17 +666,16 @@ class Player extends PositionComponent with HasGameReference<VillageGame> {
     _swing -= dt;
     _hurtCd -= dt;
     _shield -= dt;
-    _jumpT -= dt;
     _jumpCd -= dt;
     final dir = game.inputDirection;
     _moving = dir.length > .1;
     final run = running || game.shiftHeld;
     position += dir * hero.speed * (run ? 1.0 : .55) * dt;
     position.x = position.x.clamp(30, VillageGame.worldWidth - 30);
-    position.y =
-        position.y.clamp(VillageGame.groundTop + 50, VillageGame.groundBottom);
+    position.y = position.y.clamp(VillageGame.groundTop + 50, VillageGame.groundBottom);
     if (dir.x > 0.1) facingRight = true;
     if (dir.x < -0.1) facingRight = false;
+    _physics(dt);
     _mpT += dt;
     if (_mpT > 1.5) {
       _mpT = 0;
@@ -715,7 +683,7 @@ class Player extends PositionComponent with HasGameReference<VillageGame> {
     }
     if (_swing > 0) {
       _anim.play(_active.anim);
-    } else if (_jumpT > 0) {
+    } else if (!_grounded) {
       _anim.play('jump');
     } else if (_hurtCd > .5 && _shield <= 0) {
       _anim.play('hurt');
@@ -728,31 +696,125 @@ class Player extends PositionComponent with HasGameReference<VillageGame> {
     priority = y.toInt();
   }
 
+  /// Vertical motion: jump arc, landing on / walking off the flying platform.
+  void _physics(double dt) {
+    final top = game.platform.heightAt(position);
+    if (_grounded) {
+      if (z > top + .5) _grounded = false; // walked off the edge
+      return;
+    }
+    final prev = z;
+    _vz -= gravity * dt;
+    z += _vz * dt;
+    if (_vz <= 0 && top > 0 && prev >= top - 1 && z <= top) {
+      z = top; // landed on the platform
+    } else if (z <= 0) {
+      z = 0;
+    } else {
+      return;
+    }
+    _vz = 0;
+    _grounded = true;
+  }
+
   @override
   void render(Canvas canvas) {
-    canvas.drawOval(const Rect.fromLTWH(28, 90, 44, 12),
-        Paint()..color = Colors.black26);
-    final lift = _jumpT > 0 ? sin(pi * (1 - _jumpT / jumpTime)) * jumpHeight : 0;
+    canvas.drawOval(const Rect.fromLTWH(28, 90, 44, 12), Paint()..color = Colors.black26);
     canvas.save();
-    canvas.translate(0, -lift.toDouble());
+    canvas.translate(0, -z);
     _anim.render(canvas, size, flip: !facingRight);
     if (_shield > 0) {
       canvas.drawCircle(
-          Offset(size.x / 2, 66),
-          46,
-          Paint()
-            ..color = Colors.lightGreenAccent.withValues(alpha: .25)
-            ..style = PaintingStyle.fill);
+        Offset(size.x / 2, 66),
+        46,
+        Paint()
+          ..color = Colors.lightGreenAccent.withValues(alpha: .25)
+          ..style = PaintingStyle.fill,
+      );
     }
     if (_swing > 0 && _active.aoe) {
       canvas.drawCircle(
-          Offset(size.x / 2, 70),
-          90 * (1 - _swing / _active.dur) + 20,
-          Paint()
-            ..color = Colors.white.withValues(alpha: _swing / _active.dur)
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 4);
+        Offset(size.x / 2, 70),
+        90 * (1 - _swing / _active.dur) + 20,
+        Paint()
+          ..color = Colors.white.withValues(alpha: _swing / _active.dur)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 4,
+      );
     }
+    canvas.restore();
+  }
+}
+
+/// A floating slab the hero can jump onto; fights can happen on top of it.
+class FlyPlatform extends PositionComponent with HasGameReference<VillageGame> {
+  FlyPlatform(double cx, double depth) : super(position: Vector2(cx, depth), size: Vector2(slabWidth, 20), anchor: Anchor.bottomCenter);
+
+  static const slabWidth = 170.0;
+  static const topHeight = 70.0;
+
+  /// Candidate spots (centre x, depth y), cycled per stage.
+  static const spots = [(430.0, 320.0), (300.0, 350.0), (520.0, 300.0)];
+
+  double _t = 0;
+
+  double get left => x - slabWidth / 2;
+  double get right => x + slabWidth / 2;
+
+  /// Platform top height if [p] is over it, else 0.
+  double heightAt(Vector2 p) => p.x >= left && p.x <= right && (p.y - y).abs() <= 26 ? topHeight : 0;
+
+  @override
+  void update(double dt) {
+    _t += dt;
+    priority = y.toInt() - 1;
+  }
+
+  @override
+  void render(Canvas canvas) {
+    final bob = sin(_t * 2) * 3;
+    // Faint shadow on the ground far below: the island clearly hovers.
+    canvas.drawOval(Rect.fromLTWH(30, 6, slabWidth - 60, 10), Paint()..color = Colors.black26);
+    canvas.save();
+    canvas.translate(0, -topHeight + bob);
+    // Glow under the island.
+    canvas.drawOval(
+      Rect.fromLTWH(35, 34, slabWidth - 70, 22),
+      Paint()
+        ..color = const Color(0xFF80DEEA).withValues(alpha: .35)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8),
+    );
+    // Tapered rock body.
+    final body = Path()
+      ..moveTo(0, 6)
+      ..quadraticBezierTo(8, 26, slabWidth * .38, 38)
+      ..lineTo(slabWidth * .5, 52)
+      ..lineTo(slabWidth * .62, 36)
+      ..quadraticBezierTo(slabWidth - 8, 26, slabWidth, 6)
+      ..close();
+    canvas.drawPath(body, Paint()..color = const Color(0xFF6D5A4B));
+    canvas.drawPath(
+      body,
+      Paint()
+        ..color = Colors.black54
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2,
+    );
+    // Grassy top surface (ellipse reads as a top-down tile).
+    final top = Rect.fromLTWH(0, -8, slabWidth, 26);
+    canvas.drawOval(top, Paint()..color = const Color(0xFF66BB6A));
+    canvas.drawOval(top.deflate(5), Paint()..color = const Color(0xFF81C784));
+    canvas.drawOval(
+      top,
+      Paint()
+        ..color = Colors.black54
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2,
+    );
+    // Little rocks drifting around it.
+    final r = Paint()..color = const Color(0xFF6D5A4B);
+    canvas.drawCircle(Offset(-6, 40 + sin(_t * 3) * 3), 5, r);
+    canvas.drawCircle(Offset(slabWidth + 4, 34 + cos(_t * 2.5) * 3), 4, r);
     canvas.restore();
   }
 }
@@ -760,16 +822,18 @@ class Player extends PositionComponent with HasGameReference<VillageGame> {
 enum MonsterKind { slime }
 
 class Monster extends PositionComponent with HasGameReference<VillageGame> {
-  Monster(this.kind, this.stage)
-      : maxHp = 40 + stage * 25,
-        super(size: Vector2(48, 48), anchor: Anchor.bottomCenter) {
+  Monster(this.kind, this.stage, {this.onPlatform = false}) : maxHp = 40 + stage * 25, super(size: Vector2(48, 48), anchor: Anchor.bottomCenter) {
     hp = maxHp;
   }
 
   final MonsterKind kind;
   final int stage;
+  final bool onPlatform;
   final int maxHp;
   late int hp;
+
+  /// Height above ground: platform slimes stand on the flying platform.
+  double get z => onPlatform ? FlyPlatform.topHeight : 0;
   double _atkCd = 0, _wanderT = 0;
   double _t = _rng.nextDouble() * 5;
   bool _faceRight = true;
@@ -778,20 +842,16 @@ class Monster extends PositionComponent with HasGameReference<VillageGame> {
 
   @override
   Future<void> onLoad() async {
-    _frames = [
-      for (var i = 0; i < 2; i++) game.sprite('monster.png', i * 16.0, 0, 16, 16)
-    ];
+    _frames = [for (var i = 0; i < 2; i++) game.sprite('monster.png', i * 16.0, 0, 16, 16)];
   }
 
   void hurt(int dmg) {
     hp -= dmg;
-    game.world.add(
-        FloatingText('$dmg', position + Vector2(0, -50), Colors.white));
+    game.world.add(FloatingText('$dmg', position + Vector2(0, -50), Colors.white));
     position.x += (x > game.player.x ? 1 : -1) * 16;
     if (hp <= 0) {
       if (game.state.gainExp(15)) {
-        game.world.add(FloatingText('LEVEL UP!',
-            game.player.position + Vector2(0, -110), Colors.yellow));
+        game.world.add(FloatingText('LEVEL UP!', game.player.position + Vector2(0, -110), Colors.yellow));
       }
       game.monsterDied(this);
       removeFromParent();
@@ -805,7 +865,7 @@ class Monster extends PositionComponent with HasGameReference<VillageGame> {
     final p = game.player;
     final to = p.position - position;
     final dist = to.length;
-    if (dist < 220 && !p.dead) {
+    if (dist < 220 && !p.dead && (p.z - z).abs() < 50) {
       if (dist > 40) position += to.normalized() * 60 * dt;
       if (to.x.abs() > 4) _faceRight = to.x > 0;
       if (dist < 55 && _atkCd <= 0) {
@@ -816,36 +876,37 @@ class Monster extends PositionComponent with HasGameReference<VillageGame> {
       _wanderT -= dt;
       if (_wanderT <= 0) {
         _wanderT = 1 + _rng.nextDouble() * 2;
-        _wander = _rng.nextBool()
-            ? Vector2.zero()
-            : (Vector2(_rng.nextDouble() - .5, _rng.nextDouble() - .5)
-              ..normalize());
+        _wander = _rng.nextBool() ? Vector2.zero() : (Vector2(_rng.nextDouble() - .5, _rng.nextDouble() - .5)..normalize());
       }
       position += _wander * 28 * dt;
       if (_wander.x.abs() > .1) _faceRight = _wander.x > 0;
     }
-    position.x = position.x.clamp(30, VillageGame.worldWidth - 30);
-    position.y = position.y
-        .clamp(VillageGame.groundTop + 40, VillageGame.groundBottom);
+    if (onPlatform) {
+      final pf = game.platform;
+      position.x = position.x.clamp(pf.left + 12, pf.right - 12);
+      position.y = pf.y;
+    } else {
+      position.x = position.x.clamp(30, VillageGame.worldWidth - 30);
+      position.y = position.y.clamp(VillageGame.groundTop + 40, VillageGame.groundBottom);
+    }
     priority = y.toInt();
   }
 
   @override
   void render(Canvas canvas) {
-    canvas.drawOval(const Rect.fromLTWH(4, 40, 40, 8),
-        Paint()..color = Colors.black26);
+    canvas.save();
+    canvas.translate(0, -z);
+    canvas.drawOval(const Rect.fromLTWH(4, 40, 40, 8), Paint()..color = Colors.black26);
     canvas.save();
     if (!_faceRight) {
       canvas.translate(size.x, 0);
       canvas.scale(-1, 1);
     }
-    _frames[(_t * 2.5).floor() % 2]
-        .render(canvas, size: size, overridePaint: _pixel);
+    _frames[(_t * 2.5).floor() % 2].render(canvas, size: size, overridePaint: _pixel);
     canvas.restore();
-    canvas.drawRect(
-        const Rect.fromLTWH(4, -6, 40, 5), Paint()..color = Colors.black54);
-    canvas.drawRect(Rect.fromLTWH(4, -6, 40 * hp / maxHp, 5),
-        Paint()..color = Colors.redAccent);
+    canvas.drawRect(const Rect.fromLTWH(4, -6, 40, 5), Paint()..color = Colors.black54);
+    canvas.drawRect(Rect.fromLTWH(4, -6, 40 * hp / maxHp, 5), Paint()..color = Colors.redAccent);
+    canvas.restore();
   }
 }
 
@@ -866,45 +927,35 @@ class Drop extends PositionComponent with HasGameReference<VillageGame> {
     _life -= dt;
     if (_life <= 0) removeFromParent();
     priority = y.toInt();
-    if (!game.player.dead &&
-        position.distanceTo(game.player.position) < 36) {
+    if (!game.player.dead && position.distanceTo(game.player.position) < 36) {
       if (game.state.addItem(id)) {
-        game.world.add(FloatingText('+${itemDefs[id]!.name}',
-            position + Vector2(0, -30), const Color(0xFF80DEEA)));
+        game.world.add(FloatingText('+${itemDefs[id]!.name}', position + Vector2(0, -30), const Color(0xFF80DEEA)));
         removeFromParent();
       } else if (_warn <= 0) {
         _warn = 2;
-        game.world.add(
-            FloatingText('Túi đầy', position + Vector2(0, -30), Colors.red));
+        game.world.add(FloatingText('Túi đầy', position + Vector2(0, -30), Colors.red));
       }
     }
   }
 
   @override
   void render(Canvas canvas) {
-    canvas.drawOval(const Rect.fromLTWH(4, 24, 20, 6),
-        Paint()..color = Colors.black26);
-    _sprite.render(canvas,
-        position: Vector2(0, -4 - (sin(_t * 4) + 1) * 3),
-        size: size,
-        overridePaint: _pixel);
+    canvas.drawOval(const Rect.fromLTWH(4, 24, 20, 6), Paint()..color = Colors.black26);
+    _sprite.render(canvas, position: Vector2(0, -4 - (sin(_t * 4) + 1) * 3), size: size, overridePaint: _pixel);
   }
 }
 
 class FloatingText extends TextComponent {
   FloatingText(String text, Vector2 pos, Color color)
-      : super(
-          text: text,
-          position: pos,
-          anchor: Anchor.center,
-          priority: 100000,
-          textRenderer: TextPaint(
-              style: TextStyle(
-                  color: color,
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  shadows: const [Shadow(blurRadius: 3)])),
-        );
+    : super(
+        text: text,
+        position: pos,
+        anchor: Anchor.center,
+        priority: 100000,
+        textRenderer: TextPaint(
+          style: TextStyle(color: color, fontSize: 14, fontWeight: FontWeight.bold, shadows: const [Shadow(blurRadius: 3)]),
+        ),
+      );
 
   double _life = .9;
 
@@ -920,27 +971,19 @@ class Hud extends PositionComponent with HasGameReference<VillageGame> {
   Hud() : super(priority: 100);
 
   final _text = TextPaint(
-      style: const TextStyle(
-          color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold));
+    style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+  );
 
   @override
   void render(Canvas canvas) {
     final p = game.state;
-    canvas.drawRRect(
-        RRect.fromRectAndRadius(
-            const Rect.fromLTWH(10, 10, 190, 120), const Radius.circular(8)),
-        Paint()..color = Colors.black54);
-    _text.render(
-        canvas, 'Lv ${p.level}   EXP ${p.exp}/${p.expToNext}', Vector2(18, 14));
+    canvas.drawRRect(RRect.fromRectAndRadius(const Rect.fromLTWH(10, 10, 190, 120), const Radius.circular(8)), Paint()..color = Colors.black54);
+    _text.render(canvas, 'Lv ${p.level}   EXP ${p.exp}/${p.expToNext}', Vector2(18, 14));
     _bar(canvas, 18, 32, p.hp / p.maxHp, Colors.red, '${p.hp}/${p.maxHp}');
     _bar(canvas, 18, 50, p.mp / p.maxMp, Colors.blue, '${p.mp}/${p.maxMp}');
     _text.render(canvas, 'Vàng: ${p.gold}', Vector2(18, 72));
-    _text.render(canvas, 'Nhân vật: ${game.player.hero.name}',
-        Vector2(18, 90));
-    _text.render(
-        canvas,
-        'Màn ${game.stage + 1}: ${game.stageKills}/${VillageGame.killGoal} quái',
-        Vector2(18, 108));
+    _text.render(canvas, 'Nhân vật: ${game.player.hero.name}', Vector2(18, 90));
+    _text.render(canvas, 'Màn ${game.stage + 1}: ${game.stageKills}/${VillageGame.killGoal} quái', Vector2(18, 108));
   }
 
   void _bar(Canvas c, double x, double y, double f, Color col, String t) {
