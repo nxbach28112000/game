@@ -15,7 +15,7 @@ class Player extends PositionComponent with HasGameReference<VillageGame> {
 
   static const shieldTime = 2.5;
   static const jumpCooldown = .3;
-  static const jumpSpeed = 430.0;
+  static const jumpSpeed = 540.0;
   static const gravity = 950.0;
 
   late final Map<String, CharAnims> _anims;
@@ -24,7 +24,7 @@ class Player extends PositionComponent with HasGameReference<VillageGame> {
   double _swing = 0, _swingMax = .35, _hurtCd = 0, _mpT = 0, _shield = 0;
   double _jumpCd = 0, _deadT = 0;
 
-  /// Height above the ground plane (the platform top is [FlyPlatform.topHeight]).
+  /// Height above the ground plane (floors sit well above the ground).
   double z = 0, _vz = 0;
   bool _grounded = true;
   SkillDef _active = skillDefs[0];
@@ -238,18 +238,19 @@ class Player extends PositionComponent with HasGameReference<VillageGame> {
     priority = y.toInt();
   }
 
-  /// Vertical motion: jump arc, landing on / walking off the flying platform.
+  /// Vertical motion: jump arc, landing on / walking off the raised floors
+  /// (one-way: you can jump up through them).
   void _physics(double dt) {
-    final top = game.platform.heightAt(position);
     if (_grounded) {
-      if (z > top + .5) _grounded = false; // walked off the edge
+      if (z > game.supportAt(position, z + .5) + .5) _grounded = false; // walked off an edge
       return;
     }
     final prev = z;
     _vz -= gravity * dt;
     z += _vz * dt;
-    if (_vz <= 0 && top > 0 && prev >= top - 1 && z <= top) {
-      z = top; // landed on the platform
+    final support = _vz <= 0 ? game.supportAt(position, prev + 1) : 0.0;
+    if (_vz <= 0 && z <= support) {
+      z = support; // landed on a floor or the ground
     } else if (z <= 0) {
       z = 0;
     } else {

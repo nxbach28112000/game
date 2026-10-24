@@ -9,6 +9,7 @@ void main() {
   final q = Uri.base.queryParameters;
   final hero = int.tryParse(q['hero'] ?? '') ?? 0;
   final stage = int.tryParse(q['stage'] ?? '') ?? 0;
+  final boss = q['boss'] == '1';
   runApp(MaterialApp(
     debugShowCheckedModeBanner: false,
     home: Scaffold(
@@ -17,6 +18,7 @@ void main() {
         g.state.gainExp(8000);
         g.state.maxHp = 3000;
         g.state.hp = 3000;
+        if (boss) g.spawnBossNow();
       }),
     ),
   ));

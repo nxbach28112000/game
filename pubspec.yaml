@@ -69,8 +69,14 @@ flutter:
     - assets/images/FireWizard/
     - assets/images/LightningMage/
     - assets/images/Wanderer/
-    - assets/images/Portraits/
     - assets/images/Props/
+    - assets/images/Tiles/
+    - assets/images/Knight1/
+    - assets/images/Knight2/
+    - assets/images/Knight3/
+    - assets/images/Minotaur1/
+    - assets/images/Minotaur2/
+    - assets/images/Minotaur3/
     - assets/images/bg/
 
   # To add assets to your application, add an assets section, like this:

@@ -19,13 +19,12 @@ enum EnemyKind {
   bool get isSprite => file != null;
 }
 
-/// A boss fight at the end of each world.
+/// A boss that appears once a stage's monster quota is killed. [scale] is
+/// relative to a normal hero (1.5 = one and a half times as tall).
 class BossDef {
-  const BossDef(this.name, this.folder, this.tint, this.scale, this.portrait,
-      this.hp, this.dmg,
-      {this.projFolder});
+  const BossDef(this.name, this.folder, this.tint, this.scale, this.hp, this.dmg, {this.projFolder});
 
-  final String name, folder, portrait;
+  final String name, folder;
   final Color tint;
   final double scale;
   final int hp, dmg;
@@ -36,30 +35,35 @@ class BossDef {
   bool get ranged => projFolder != null;
 }
 
+const _white = Color(0xFFFFFFFF);
+
+const _knight1 = BossDef('Hiệp sĩ Thép', 'Knight1', _white, 1.5, 800, 22);
+const _minotaur1 = BossDef('Minotaur Cuồng Nộ', 'Minotaur1', _white, 1.5, 1050, 25);
+const _knight2 = BossDef('Hiệp sĩ Đỏ', 'Knight2', _white, 1.5, 1300, 28);
+const _fireMage = BossDef('Pháp sư Lửa', 'FireWizard', Color(0xFFFFB38A), 1.5, 1450, 24, projFolder: 'FireWizard');
+const _minotaur2 = BossDef('Minotaur Chiến Binh', 'Minotaur2', _white, 1.5, 1800, 33);
+const _stormMage = BossDef('Pháp sư Sét', 'LightningMage', Color(0xFFB8C8FF), 1.5, 1950, 28, projFolder: 'LightningMage');
+const _knight3 = BossDef('Hiệp sĩ Bóng Tối', 'Knight3', _white, 1.5, 2300, 38);
+const _minotaur3 = BossDef('Minotaur Chúa', 'Minotaur3', _white, 1.5, 3000, 42);
+
 class StageDef {
-  const StageDef(this.name, this.bg, this.enemies, {this.boss});
+  const StageDef(this.name, this.bg, this.enemies, this.boss);
 
   final String name;
-  final int bg; // index into backgroundFiles
+  final int bg; // index into the 4 background worlds
   final List<EnemyKind> enemies;
-  final BossDef? boss;
+  final BossDef boss;
 }
 
-const _boss1 = BossDef('Hiệp sĩ Hoàng Kim', 'Samurai', Color(0xFFFFD27A), 2.1, 'Portraits/boss1.png', 900, 26);
-const _boss2 = BossDef('Pháp sư Lửa', 'FireWizard', Color(0xFFFFB38A), 2.3, 'Portraits/boss2.png', 1100, 22,
-    projFolder: 'FireWizard');
-const _boss3 = BossDef('Pháp sư Sét', 'LightningMage', Color(0xFFB8C8FF), 2.3, 'Portraits/boss3.png', 1300, 24,
-    projFolder: 'LightningMage');
-const _boss4 = BossDef('Sát thủ Bóng Đêm', 'Shinobi', Color(0xFF9A7BFF), 2.1, 'Portraits/boss4.png', 1700, 32);
-
-/// 4 worlds x (50-kill stage + boss) = 8 stages.
+/// 4 worlds x 2 stages. Each stage asks for 10 x (stage number) kills, then
+/// its boss appears; beating the boss opens the arrow to the next stage.
 const stages = [
-  StageDef('Sân thượng', 0, [EnemyKind.slime]),
-  StageDef('Sân thượng - Boss', 0, [EnemyKind.slime], boss: _boss1),
-  StageDef('Phòng ngai vàng', 1, [EnemyKind.slime, EnemyKind.goblin, EnemyKind.bat]),
-  StageDef('Phòng ngai vàng - Boss', 1, [EnemyKind.slime], boss: _boss2),
-  StageDef('Lâu đài', 2, [EnemyKind.goblin, EnemyKind.bat, EnemyKind.spider, EnemyKind.brute, EnemyKind.mage]),
-  StageDef('Lâu đài - Boss', 2, [EnemyKind.slime], boss: _boss3),
-  StageDef('Rừng chết', 3, [EnemyKind.goblin, EnemyKind.spider, EnemyKind.brute, EnemyKind.mage, EnemyKind.bat]),
-  StageDef('Rừng chết - Boss', 3, [EnemyKind.slime], boss: _boss4),
+  StageDef('Sân thượng', 0, [EnemyKind.slime], _knight1),
+  StageDef('Sân thượng II', 0, [EnemyKind.slime, EnemyKind.goblin], _minotaur1),
+  StageDef('Phòng ngai vàng', 1, [EnemyKind.slime, EnemyKind.goblin, EnemyKind.bat], _knight2),
+  StageDef('Phòng ngai vàng II', 1, [EnemyKind.goblin, EnemyKind.bat, EnemyKind.spider], _fireMage),
+  StageDef('Lâu đài', 2, [EnemyKind.goblin, EnemyKind.bat, EnemyKind.spider, EnemyKind.brute], _minotaur2),
+  StageDef('Lâu đài II', 2, [EnemyKind.goblin, EnemyKind.spider, EnemyKind.brute, EnemyKind.mage], _stormMage),
+  StageDef('Rừng chết', 3, [EnemyKind.spider, EnemyKind.brute, EnemyKind.mage, EnemyKind.bat], _knight3),
+  StageDef('Rừng chết II', 3, [EnemyKind.goblin, EnemyKind.spider, EnemyKind.brute, EnemyKind.mage], _minotaur3),
 ];

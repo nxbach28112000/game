@@ -5,12 +5,13 @@ import 'package:flutter/material.dart';
 
 import 'audio/audio.dart';
 import 'common.dart';
+import 'floors.dart';
 import 'heroes.dart';
 import 'stages.dart';
 import 'village_game.dart';
 
 class Monster extends PositionComponent with HasGameReference<VillageGame> {
-  Monster(this.kind, this.stageIdx, {this.onPlatform = false, this.boss})
+  Monster(this.kind, this.stageIdx, {this.floor, this.boss})
       : maxHp = boss?.hp ?? _baseHp(kind, stageIdx),
         super(
             size: boss != null
@@ -36,7 +37,10 @@ class Monster extends PositionComponent with HasGameReference<VillageGame> {
 
   final EnemyKind kind;
   final int stageIdx;
-  final bool onPlatform;
+  /// Set for monsters that live on a raised floor.
+  final FloorPlatform? floor;
+
+  bool get onPlatform => floor != null;
   final BossDef? boss;
   final int maxHp;
   late int hp;
@@ -47,7 +51,7 @@ class Monster extends PositionComponent with HasGameReference<VillageGame> {
   bool get dying => _dying;
 
   /// Height above ground: platform slimes stand on the flying platform.
-  double get z => onPlatform ? FlyPlatform.topHeight : 0;
+  double get z => floor?.z ?? 0;
 
   int get exp => isBoss
       ? 250
@@ -199,8 +203,8 @@ class Monster extends PositionComponent with HasGameReference<VillageGame> {
       _moving = !_wander.isZero();
       if (_wander.x.abs() > .1) _faceRight = _wander.x > 0;
     }
-    if (onPlatform) {
-      final pf = game.platform;
+    final pf = floor;
+    if (pf != null) {
       position.x = position.x.clamp(pf.left + 12, pf.right - 12);
       position.y = pf.y;
     } else {

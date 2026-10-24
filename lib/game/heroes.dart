@@ -30,6 +30,12 @@ class CharAnims {
     'FireWizard',
     'LightningMage',
     'Wanderer',
+    'Knight1',
+    'Knight2',
+    'Knight3',
+    'Minotaur1',
+    'Minotaur2',
+    'Minotaur3',
   ];
 
   /// name -> (file, seconds per frame, loops)
@@ -67,9 +73,11 @@ class CharAnims {
       canvas.translate(size.x, 0);
       canvas.scale(-1, 1);
     }
+    // Some sheets draw the body off-centre in the 128px cell.
+    final shift = (folderShiftX[folder] ?? 0) * size.x / 128;
     _tickers[_cur]!
         .getSprite()
-        .render(canvas, size: size, overridePaint: paint ?? pixelPaint);
+        .render(canvas, position: Vector2(shift, 0), size: size, overridePaint: paint ?? pixelPaint);
     canvas.restore();
   }
 }
@@ -161,6 +169,12 @@ const folderScale = {
   'FireWizard': 1.2,
   'LightningMage': 1.27,
   'Wanderer': 1.2,
+  'Knight1': 1.25,
+  'Knight2': 1.25,
+  'Knight3': 1.25,
+  'Minotaur1': .87,
+  'Minotaur2': .94,
+  'Minotaur3': .86,
 };
 
 /// Fraction of the (unscaled) cell a standing character fills, from its feet.
@@ -171,4 +185,20 @@ const folderHeightFrac = {
   'FireWizard': .516,
   'LightningMage': .492,
   'Wanderer': .516,
+  'Knight1': .5,
+  'Knight2': .5,
+  'Knight3': .5,
+  'Minotaur1': .719,
+  'Minotaur2': .664,
+  'Minotaur3': .727,
+};
+
+/// Cell pixels to shift a sheet right so its body is centred.
+const folderShiftX = {
+  'Knight1': 31.0,
+  'Knight2': 31.0,
+  'Knight3': 31.0,
+  'Minotaur1': 6.0,
+  'Minotaur2': 17.0,
+  'Minotaur3': 0.0,
 };

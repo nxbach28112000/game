@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 
 import 'audio/audio.dart';
 import 'common.dart';
+import 'floors.dart';
 import 'game_state.dart';
 import 'heroes.dart';
 import 'monster.dart';
@@ -20,9 +21,6 @@ import 'stages.dart';
 
 /// Build with --dart-define=QUICK=true to need only 3 kills per stage.
 const kQuick = bool.fromEnvironment('QUICK');
-
-/// The flying platform is switched off for now (set true to bring it back).
-const kPlatforms = false;
 
 const _crystalColors = ['red', 'red', 'blue', 'violet'];
 
@@ -43,7 +41,7 @@ class VillageGame extends FlameGame with KeyboardEvents {
   late final Background background;
   late final ParticleLayer fx;
   double _shakeT = 0, _shakeAmp = 0;
-  late FlyPlatform platform;
+  final floors = <FloorPlatform>[];
   late final JoystickComponent joystick;
   final List<Monster> monsters = [];
   final Set<LogicalKeyboardKey> _keys = {};
@@ -55,6 +53,7 @@ class VillageGame extends FlameGame with KeyboardEvents {
   int _recordedKills = 0;
   double runTime = 0;
   bool bossDefeated = false;
+  bool bossSpawned = false;
   Monster? bossRef;
 
   /// True while a run is being played (false on menu / select / end screens).
@@ -65,13 +64,22 @@ class VillageGame extends FlameGame with KeyboardEvents {
   VoidCallback? onReady;
   Map<String, dynamic>? _checkpoint;
 
-  /// Pending monster respawns: (seconds left, on platform, stage index).
-  final _respawns = <(double, bool, int)>[];
+  /// Pending monster respawns: (seconds left, floor index or -1, stage index).
+  final _respawns = <(double, int, int)>[];
 
   StageDef get stageDef => stages[stageIdx];
-  bool get isBossStage => stageDef.boss != null;
-  int get killGoal => kQuick ? 3 : 50;
-  bool get portalOpen => isBossStage ? bossDefeated : stageKills >= killGoal;
+  /// Monsters to kill before the boss appears: 10 x stage number.
+  int get killGoal => kQuick ? 3 : 10 * (stageIdx + 1);
+  bool get portalOpen => bossDefeated;
+
+  /// Height of the highest floor under [p] that is at or below [zMax] (0 = ground).
+  double supportAt(Vector2 p, double zMax) {
+    var best = 0.0;
+    for (final f in floors) {
+      if (f.z <= zMax && f.z > best && f.covers(p)) best = f.z;
+    }
+    return best;
+  }
   bool get isLastStage => stageIdx == stages.length - 1;
 
   @override
@@ -94,7 +102,8 @@ class VillageGame extends FlameGame with KeyboardEvents {
         for (final spec in CharAnims.specs.values) '$folder/${spec.$1}.png',
       for (final p in projDefs.values) '${p.folder}/Proj.png',
       for (final d in itemDefs.values) '${d.icon}.png',
-      for (var i = 1; i <= 4; i++) 'Portraits/boss$i.png',
+      for (final n in const ['02', '05', '07', '08', '10', '11', '12']) 'Tiles/ground$n.png',
+      for (final n in const ['crate', 'barrel', 'hay1', 'hay2', 'rock1', 'rock2', 'rockflat1', 'rockflat2', 'plant1', 'plant2', 'fence1', 'sign1', 'table1', 'table2']) 'Tiles/$n.png',
       for (var i = 1; i <= 10; i++) 'Props/bush$i.png',
       for (final c in _crystalColors)
         for (final n in const [1, 3, 5]) 'Props/crystal_$c$n.png',
@@ -110,8 +119,6 @@ class VillageGame extends FlameGame with KeyboardEvents {
     fx = ParticleLayer();
     world.add(fx);
     world.add(ExitArrow());
-    platform = FlyPlatform(430, 320);
-    if (kPlatforms) world.add(platform);
     player = Player()..position = playerStart.clone();
     world.add(player);
 
@@ -163,13 +170,15 @@ class VillageGame extends FlameGame with KeyboardEvents {
     if (!inPlay) return;
     runTime += dt;
     for (var i = _respawns.length - 1; i >= 0; i--) {
-      final (t, onPlat, st) = _respawns[i];
+      final (t, fi, st) = _respawns[i];
       if (t - dt > 0) {
-        _respawns[i] = (t - dt, onPlat, st);
+        _respawns[i] = (t - dt, fi, st);
         continue;
       }
       _respawns.removeAt(i);
-      if (st == stageIdx && !portalOpen) _spawnMonster(onPlatform: onPlat);
+      if (st == stageIdx && !bossSpawned) {
+        _spawnMonster(floor: fi >= 0 && fi < floors.length ? floors[fi] : null);
+      }
     }
   }
 
@@ -300,39 +309,24 @@ class VillageGame extends FlameGame with KeyboardEvents {
     _clearStage();
     stageKills = 0;
     bossDefeated = false;
+    bossSpawned = false;
     bossRef = null;
-    platform.removeFromParent();
-    final spot = FlyPlatform.spots[stageIdx % FlyPlatform.spots.length];
-    platform = FlyPlatform(spot.$1, spot.$2);
-    if (kPlatforms) world.add(platform);
+    _buildFloors();
     player.reset(selectedHero);
     _spawnProps();
-    final boss = stageDef.boss;
-    if (boss != null) {
-      bossRef = Monster(EnemyKind.slime, stageIdx, boss: boss)..position = Vector2(620, 340);
-      monsters.add(bossRef!);
-      world.add(bossRef!);
-      for (var i = 0; i < 3; i++) {
-        _spawnMonster(kind: EnemyKind.slime);
-      }
-    } else {
-      for (var i = 0; i < 7; i++) {
-        _spawnMonster();
-      }
+    for (var i = 0; i < 7; i++) {
+      _spawnMonster();
     }
-    for (var i = 0; i < (kPlatforms ? 2 : 0); i++) {
-      _spawnMonster(onPlatform: true);
+    for (final f in floors) {
+      _spawnMonster(floor: f);
     }
     if (checkpoint) {
       _checkpoint = _runJson();
       SaveStore.saveRun(_checkpoint!);
     }
-    world.add(FloatingText(
-        boss != null ? 'BOSS: ${boss.name}' : 'Màn ${stageIdx + 1}: ${stageDef.name}',
-        Vector2(400, 140),
-        boss != null ? Colors.redAccent : Colors.yellow));
-    GameAudio.music(boss != null ? 'boss' : 'w${stageDef.bg + 1}');
-    GameAudio.sfx(boss != null ? 'roar' : 'stage');
+    world.add(FloatingText('Màn ${stageIdx + 1}: ${stageDef.name}  (hạ $killGoal quái để gọi boss)', Vector2(400, 140), Colors.yellow));
+    GameAudio.music('w${stageDef.bg + 1}');
+    GameAudio.sfx('stage');
     _changing = false;
   }
 
@@ -407,11 +401,12 @@ class VillageGame extends FlameGame with KeyboardEvents {
 
   EnemyKind _randomKind() => stageDef.enemies[rng.nextInt(stageDef.enemies.length)];
 
-  void _spawnMonster({EnemyKind? kind, bool onPlatform = false}) {
-    final k = onPlatform ? EnemyKind.slime : (kind ?? _randomKind());
-    final m = Monster(k, stageIdx, onPlatform: onPlatform)
-      ..position = onPlatform
-          ? Vector2(platform.left + 20 + rng.nextDouble() * (FlyPlatform.slabWidth - 40), platform.y)
+  void _spawnMonster({EnemyKind? kind, FloorPlatform? floor}) {
+    var k = kind ?? _randomKind();
+    if (floor != null && !k.isSprite) k = EnemyKind.slime; // floors host the small monsters
+    final m = Monster(k, stageIdx, floor: floor)
+      ..position = floor != null
+          ? Vector2(floor.left + 24 + rng.nextDouble() * (floor.floorW - 48), floor.y)
           : Vector2(250 + rng.nextDouble() * (worldWidth - 340),
               groundTop + 60 + rng.nextDouble() * (groundBottom - groundTop - 70));
     monsters.add(m);
@@ -421,18 +416,53 @@ class VillageGame extends FlameGame with KeyboardEvents {
   /// Boss minions.
   void spawnAdd() => _spawnMonster(kind: EnemyKind.slime);
 
+  /// 2-3 raised floors from the tileset, alternating left/right. Each is at
+  /// least 40% of the screen wide and the lowest one sits above the boss's head.
+  void _buildFloors() {
+    for (final f in floors) {
+      f.removeFromParent();
+    }
+    floors.clear();
+    const tints = [Color(0xFFD8B8C0), Color(0xFFD0A8B0), Color(0xFFB8BCDC), Color(0xFFC4AAC4)];
+    final count = stageIdx >= 3 ? 3 : 2;
+    final firstLeft = rng.nextBool();
+    for (var i = 0; i < count; i++) {
+      final left = i == 1 ? !firstLeft : (i == 0 ? firstLeft : !firstLeft);
+      final width = FloorPlatform.minWidth + 10 + rng.nextDouble() * 60;
+      final edge = rng.nextDouble() * 40;
+      final cx = left ? 10 + edge + width / 2 : worldWidth - 10 - edge - width / 2;
+      final z = switch (i) { 0 => 122.0 + rng.nextDouble() * 8, 1 => 200.0 + rng.nextDouble() * 6, _ => 126.0 + rng.nextDouble() * 8 };
+      final depth = switch (i) { 0 => 355.0, 1 => 300.0, _ => 398.0 } + rng.nextDouble() * 10;
+      final f = FloorPlatform(cx: cx, depth: depth, floorW: width, z: z, style: rng.nextInt(3), tint: tints[stageDef.bg]);
+      floors.add(f);
+      world.add(f);
+    }
+  }
+
+  /// Dev shortcut (lib/debug_main.dart): summon the boss immediately.
+  void spawnBossNow() {
+    if (!bossSpawned) _spawnBoss();
+  }
+
+  void _spawnBoss() {
+    final boss = stageDef.boss;
+    bossSpawned = true;
+    _respawns.clear();
+    bossRef = Monster(EnemyKind.slime, stageIdx, boss: boss)..position = Vector2(worldWidth - 140, 345);
+    monsters.add(bossRef!);
+    world.add(bossRef!);
+    fx.ring(bossRef!.position.clone(), const Color(0xFFFF6040), count: 44, speed: 250);
+    shake(8, .6);
+    GameAudio.music('boss');
+    GameAudio.sfx('roar');
+    world.add(FloatingText('BOSS: ${boss.name}', Vector2(400, 140), Colors.redAccent));
+  }
+
   void monsterDied(Monster m) {
     monsters.remove(m);
     state.onKill();
     runKills++;
-    if (!m.isBoss && stageKills < killGoal) {
-      stageKills++;
-      if (!isBossStage && portalOpen) {
-        world.add(FloatingText('Hoàn thành màn! Đi sang phải →', Vector2(400, 150), Colors.yellow));
-      }
-    }
     state.touch();
-    if (portalOpen || m.isBoss) GameAudio.sfx('portal');
     final gold = m.goldDrop;
     state.gold += gold;
     world.add(FloatingText('+$gold vàng', m.position + Vector2(0, -50), const Color(0xFFFFD54F)));
@@ -448,8 +478,9 @@ class VillageGame extends FlameGame with KeyboardEvents {
         drop(ItemId.stone, 1);
         drop(ItemId.potion, 1);
       }
+      GameAudio.sfx('portal');
       for (final other in List<Monster>.from(monsters)) {
-        if (!other.onPlatform) other.hurt(99999); // minions die with the boss
+        other.hurt(99999); // minions die with the boss
       }
       world.add(FloatingText(isLastStage ? 'CHIẾN THẮNG! Đi sang phải →' : 'Boss bị hạ! Đi sang phải →',
           Vector2(400, 150), Colors.yellow));
@@ -459,7 +490,14 @@ class VillageGame extends FlameGame with KeyboardEvents {
     drop(ItemId.gel, human ? 0 : .65);
     drop(ItemId.potion, human ? .3 : .15);
     drop(ItemId.stone, human ? .4 : .2);
-    if (m.onPlatform || !isBossStage) _respawns.add((3.0, m.onPlatform, stageIdx));
+    if (!bossSpawned) {
+      stageKills++;
+      if (stageKills >= killGoal) {
+        _spawnBoss();
+      } else {
+        _respawns.add((3.0, m.floor == null ? -1 : floors.indexOf(m.floor!), stageIdx));
+      }
+    }
   }
 
   // ---- panels ----
@@ -624,79 +662,6 @@ class ExitArrow extends PositionComponent with HasGameReference<VillageGame> {
   }
 }
 
-class FlyPlatform extends PositionComponent with HasGameReference<VillageGame> {
-  FlyPlatform(double cx, double depth) : super(position: Vector2(cx, depth), size: Vector2(slabWidth, 20), anchor: Anchor.bottomCenter);
-
-  static const slabWidth = 170.0;
-  static const topHeight = 70.0;
-
-  /// Candidate spots (centre x, depth y), cycled per stage.
-  static const spots = [(430.0, 320.0), (300.0, 350.0), (520.0, 300.0)];
-
-  double _t = 0;
-
-  double get left => x - slabWidth / 2;
-  double get right => x + slabWidth / 2;
-
-  /// Platform top height if [p] is over it, else 0.
-  double heightAt(Vector2 p) => kPlatforms && p.x >= left && p.x <= right && (p.y - y).abs() <= 26 ? topHeight : 0;
-
-  @override
-  void update(double dt) {
-    _t += dt;
-    priority = y.toInt() - 1;
-  }
-
-  @override
-  void render(Canvas canvas) {
-    final bob = sin(_t * 2) * 3;
-    // Faint shadow on the ground far below: the island clearly hovers.
-    canvas.drawOval(Rect.fromLTWH(30, 6, slabWidth - 60, 10), Paint()..color = Colors.black26);
-    canvas.save();
-    canvas.translate(0, -topHeight + bob);
-    // Glow under the island.
-    canvas.drawOval(
-      Rect.fromLTWH(35, 34, slabWidth - 70, 22),
-      Paint()
-        ..color = const Color(0xFF80DEEA).withValues(alpha: .35)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8),
-    );
-    // Tapered rock body.
-    final body = Path()
-      ..moveTo(0, 6)
-      ..quadraticBezierTo(8, 26, slabWidth * .38, 38)
-      ..lineTo(slabWidth * .5, 52)
-      ..lineTo(slabWidth * .62, 36)
-      ..quadraticBezierTo(slabWidth - 8, 26, slabWidth, 6)
-      ..close();
-    canvas.drawPath(body, Paint()..color = const Color(0xFF6D5A4B));
-    canvas.drawPath(
-      body,
-      Paint()
-        ..color = Colors.black54
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2,
-    );
-    // Grassy top surface (ellipse reads as a top-down tile).
-    final top = Rect.fromLTWH(0, -8, slabWidth, 26);
-    canvas.drawOval(top, Paint()..color = const Color(0xFF66BB6A));
-    canvas.drawOval(top.deflate(5), Paint()..color = const Color(0xFF81C784));
-    canvas.drawOval(
-      top,
-      Paint()
-        ..color = Colors.black54
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2,
-    );
-    // Little rocks drifting around it.
-    final r = Paint()..color = const Color(0xFF6D5A4B);
-    canvas.drawCircle(Offset(-6, 40 + sin(_t * 3) * 3), 5, r);
-    canvas.drawCircle(Offset(slabWidth + 4, 34 + cos(_t * 2.5) * 3), 4, r);
-    canvas.restore();
-  }
-}
-
-
 class Drop extends PositionComponent with HasGameReference<VillageGame> {
   Drop(this.id) : super(size: Vector2.all(28), anchor: Anchor.bottomCenter);
 
@@ -787,7 +752,7 @@ class Hud extends PositionComponent with HasGameReference<VillageGame> {
     _text.render(canvas, 'Nhân vật: ${game.player.hero.name}', Vector2(18, 90));
     _text.render(
         canvas,
-        game.isBossStage
+        game.bossSpawned
             ? 'Màn ${game.stageIdx + 1}/${stages.length}: BOSS'
             : 'Màn ${game.stageIdx + 1}/${stages.length}: ${game.stageKills}/${game.killGoal} quái',
         Vector2(18, 108));
@@ -797,8 +762,10 @@ class Hud extends PositionComponent with HasGameReference<VillageGame> {
       const x = 250.0, y = 398.0, w = 300.0;
       canvas.drawRRect(RRect.fromRectAndRadius(const Rect.fromLTWH(x - 50, y - 22, w + 60, 50), const Radius.circular(8)),
           Paint()..color = Colors.black54);
-      final portrait = game.images.fromCache(def.portrait);
-      canvas.drawImageRect(portrait, Rect.fromLTWH(0, 0, portrait.width.toDouble(), portrait.height.toDouble()),
+      // Face of the boss: a crop of its own idle sprite.
+      final idle = game.images.fromCache('${def.folder}/Idle.png');
+      final cx = 64 - (folderShiftX[def.folder] ?? 0);
+      canvas.drawImageRect(idle, Rect.fromLTWH(cx - 30, 128 * (1 - (folderHeightFrac[def.folder] ?? .6)) - 4, 60, 66),
           const Rect.fromLTWH(x - 44, y - 18, 34, 44), pixelPaint);
       _title.render(canvas, def.name, Vector2(x, y - 18));
       canvas.drawRect(const Rect.fromLTWH(x, y, w, 12), Paint()..color = Colors.black87);
