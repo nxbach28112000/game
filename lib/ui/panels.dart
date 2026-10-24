@@ -3,6 +3,9 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 import '../game/game_state.dart';
+import '../game/heroes.dart';
+import '../game/save_store.dart';
+import '../game/stages.dart';
 import '../game/village_game.dart';
 
 const _panelColor = Color(0xF21A2238);
@@ -53,6 +56,8 @@ class HudButtons extends StatelessWidget {
             _btn('Túi đồ (I)', () => game.openPanel('inventory')),
             _btn('Nhiệm vụ (Q)${game.state.hasQuestAttention ? ' !' : ''}',
                 () => game.openPanel('quests')),
+            _btn('Cửa hàng (B)', () => game.openPanel('shop')),
+            _btn('Dừng (P)', game.openPause),
           ],
         ),
       ),
@@ -381,21 +386,176 @@ class _QuestPanelState extends State<QuestPanel> {
 
 /// Paints the first frame of a hero's Idle sheet (128px frames).
 class _HeroPainter extends CustomPainter {
-  _HeroPainter(this.image);
+  _HeroPainter(this.image, [this.zoom = 1]);
 
   final ui.Image image;
+  final double zoom;
 
   @override
   void paint(Canvas canvas, Size size) {
-    canvas.drawImageRect(
-        image,
-        const Rect.fromLTWH(0, 0, 128, 128),
-        Offset.zero & size,
+    canvas.drawImageRect(image, Rect.fromLTWH(64 - 64 / zoom, 128 - 128 / zoom, 128 / zoom, 128 / zoom), Offset.zero & size,
         Paint()..filterQuality = FilterQuality.none);
   }
 
   @override
   bool shouldRepaint(_HeroPainter old) => old.image != image;
+}
+
+/// Full-screen backdrop used by the menu style screens.
+class _Screen extends StatelessWidget {
+  const _Screen({required this.child, this.color = const Color(0xE60B1020)});
+
+  final Widget child;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => Material(
+        color: color,
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(12),
+            child: DefaultTextStyle(style: const TextStyle(color: Colors.white, fontSize: 14), child: child),
+          ),
+        ),
+      );
+}
+
+Widget _bigButton(String label, VoidCallback? onTap, {Color color = const Color(0xFF2E7D32), double width = 230}) =>
+    Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: SizedBox(
+        width: width,
+        child: FilledButton(
+          style: FilledButton.styleFrom(
+              backgroundColor: color,
+              disabledBackgroundColor: Colors.white12,
+              disabledForegroundColor: Colors.white38,
+              padding: const EdgeInsets.symmetric(vertical: 14)),
+          onPressed: onTap,
+          child: Text(label, style: const TextStyle(fontSize: 16)),
+        ),
+      ),
+    );
+
+class MainMenu extends StatefulWidget {
+  const MainMenu({super.key, required this.game});
+
+  final VillageGame game;
+
+  @override
+  State<MainMenu> createState() => _MainMenuState();
+}
+
+class _MainMenuState extends State<MainMenu> {
+  Map<String, dynamic>? _run;
+  Map<String, dynamic> _rec = {'bestStage': 0, 'kills': 0, 'wins': 0};
+  bool _busy = false;
+  bool _help = false;
+
+  @override
+  void initState() {
+    super.initState();
+    SaveStore.loadRun().then((r) {
+      if (mounted) setState(() => _run = r);
+    });
+    SaveStore.loadRecords().then((r) {
+      if (mounted) setState(() => _rec = r);
+    });
+  }
+
+  Future<void> _continue() async {
+    setState(() => _busy = true);
+    final ok = await widget.game.continueRun();
+    if (!ok && mounted) setState(() => _busy = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_help) return HelpScreen(onBack: () => setState(() => _help = false));
+    final run = _run;
+    String? resume;
+    if (run != null) {
+      final st = (run['stage'] as int).clamp(0, stages.length - 1);
+      final hero = heroes[(run['hero'] as int).clamp(0, heroes.length - 1)].name;
+      resume = 'Màn ${st + 1}/${stages.length} • $hero • Lv ${(run['state'] as Map)['level']}';
+    }
+    return _Screen(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('SLIME SLAYER',
+              style: TextStyle(
+                  fontSize: 44,
+                  fontWeight: FontWeight.w900,
+                  color: _gold,
+                  letterSpacing: 4,
+                  shadows: [Shadow(blurRadius: 10, color: Colors.black)])),
+          const Text('Đấu trường diệt slime', style: TextStyle(color: Colors.white70, fontSize: 15)),
+          const SizedBox(height: 22),
+          _bigButton('Chơi mới', _busy ? null : widget.game.openSelect),
+          _bigButton('Tiếp tục', run == null || _busy ? null : _continue, color: const Color(0xFF1565C0)),
+          if (resume != null) Text(resume, style: const TextStyle(color: Colors.white60, fontSize: 12)),
+          _bigButton('Hướng dẫn', () => setState(() => _help = true), color: Colors.blueGrey.shade700),
+          const SizedBox(height: 12),
+          Text('Kỷ lục: màn ${_rec['bestStage']}/${stages.length}  •  ${_rec['kills']} quái đã diệt  •  ${_rec['wins']} lần thắng',
+              style: const TextStyle(color: Colors.white54, fontSize: 12)),
+        ],
+      ),
+    );
+  }
+}
+
+class HelpScreen extends StatelessWidget {
+  const HelpScreen({super.key, required this.onBack});
+
+  final VoidCallback onBack;
+
+  static const _rows = [
+    ('WASD / mũi tên / cần điều khiển', 'Di chuyển'),
+    ('Space hoặc J', 'Đánh thường (attack 1)'),
+    ('K hoặc 1', 'Kỹ năng 1 (attack 2)'),
+    ('L hoặc 2', 'Kỹ năng 2 (attack 3)'),
+    ('F hoặc 3', 'Dựng khiên: giảm 80% sát thương'),
+    ('Shift giữ / R', 'Chạy (bật/tắt)'),
+    ('X', 'Nhảy: né đòn, nhảy lên sàn bay'),
+    ('H', 'Uống bình máu'),
+    ('I / Q / B', 'Túi đồ / Nhiệm vụ / Cửa hàng'),
+    ('Esc hoặc P', 'Tạm dừng'),
+  ];
+
+  @override
+  Widget build(BuildContext context) => _Screen(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('HƯỚNG DẪN', style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: _gold)),
+              const SizedBox(height: 10),
+              const Text(
+                  'Diệt 50 quái mỗi màn để mở mũi tên bên phải, rồi đánh bại boss của thế giới. '
+                  'Hạ boss cuối để thắng. Hết máu là thua (có thể thử lại màn từ điểm lưu).',
+                  style: TextStyle(color: Colors.white70)),
+              const SizedBox(height: 10),
+              for (final r in _rows)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: Row(children: [
+                    SizedBox(width: 230, child: Text(r.$1, style: const TextStyle(color: _gold))),
+                    Expanded(child: Text(r.$2)),
+                  ]),
+                ),
+              const SizedBox(height: 6),
+              const Text('Mẹo: vòng đỏ dưới chân boss là đòn đập đất, hãy nhảy (X) để né. '
+                  'Trên sàn bay có quái và đòn đánh chỉ trúng quái cùng độ cao.',
+                  style: TextStyle(color: Colors.white70, fontSize: 12)),
+              const SizedBox(height: 12),
+              Center(child: _bigButton('Quay lại', onBack, color: Colors.blueGrey.shade700, width: 180)),
+            ],
+          ),
+        ),
+      );
 }
 
 class CharacterSelect extends StatefulWidget {
@@ -409,6 +569,7 @@ class CharacterSelect extends StatefulWidget {
 
 class _CharacterSelectState extends State<CharacterSelect> {
   int _picked = 0;
+  bool _busy = false;
 
   @override
   void initState() {
@@ -418,44 +579,44 @@ class _CharacterSelectState extends State<CharacterSelect> {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
+    return _Screen(
       color: const Color(0xF2101626),
-      child: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(12),
-          child: DefaultTextStyle(
-            style: const TextStyle(color: Colors.white, fontSize: 14),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text('CHỌN NHÂN VẬT',
-                    style: TextStyle(
-                        fontSize: 26,
-                        fontWeight: FontWeight.bold,
-                        color: _gold)),
-                const SizedBox(height: 14),
-                Wrap(
-                  spacing: 14,
-                  runSpacing: 14,
-                  alignment: WrapAlignment.center,
-                  children: [
-                    for (var i = 0; i < heroes.length; i++) _card(i),
-                  ],
-                ),
-                const SizedBox(height: 18),
-                FilledButton(
-                  style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFF2E7D32),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 36, vertical: 14)),
-                  onPressed: () => widget.game.startGame(_picked),
-                  child: Text('Vào game: ${heroes[_picked].name}',
-                      style: const TextStyle(fontSize: 16)),
-                ),
-              ],
-            ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('CHỌN NHÂN VẬT', style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: _gold)),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            alignment: WrapAlignment.center,
+            children: [for (var i = 0; i < heroes.length; i++) _card(i)],
           ),
-        ),
+          const SizedBox(height: 14),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: Colors.blueGrey.shade700),
+                onPressed: widget.game.toMenu,
+                child: const Text('Quay lại'),
+              ),
+              const SizedBox(width: 12),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF2E7D32),
+                    padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 14)),
+                onPressed: _busy
+                    ? null
+                    : () {
+                        setState(() => _busy = true);
+                        widget.game.startNew(_picked);
+                      },
+                child: Text('Vào game: ${heroes[_picked].name}', style: const TextStyle(fontSize: 16)),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -467,8 +628,8 @@ class _CharacterSelectState extends State<CharacterSelect> {
     return GestureDetector(
       onTap: () => setState(() => _picked = i),
       child: Container(
-        width: 170,
-        padding: const EdgeInsets.all(10),
+        width: 150,
+        padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
           color: sel ? const Color(0xFF2A3558) : _panelColor,
           borderRadius: BorderRadius.circular(10),
@@ -476,27 +637,42 @@ class _CharacterSelectState extends State<CharacterSelect> {
         ),
         child: Column(
           children: [
-            SizedBox(
-                width: 120,
-                height: 120,
-                child: CustomPaint(painter: _HeroPainter(image))),
-            Text(h.name,
-                style: const TextStyle(
-                    fontSize: 18, fontWeight: FontWeight.bold, color: _gold)),
+            SizedBox(width: 100, height: 100, child: CustomPaint(painter: _HeroPainter(image, h.scale))),
+            Text(h.name, textAlign: TextAlign.center, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _gold)),
+            const SizedBox(height: 3),
+            Text(h.blurb, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70, fontSize: 11)),
             const SizedBox(height: 4),
-            Text(h.blurb,
+            Text(
+                'Tốc độ ${h.speed.round()} • ST x${h.dmgMul}'
+                '${h.defBonus > 0 ? ' • Giáp +${h.defBonus}' : ''}',
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white70, fontSize: 12)),
-            const SizedBox(height: 6),
-            Text('Tốc độ ${h.speed.round()}  •  Sát thương x${h.dmgMul}'
-                '${h.defBonus > 0 ? '  •  Giáp +${h.defBonus}' : ''}',
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 11)),
+                style: const TextStyle(fontSize: 10)),
           ],
         ),
       ),
     );
   }
+}
+
+class PauseMenu extends StatelessWidget {
+  const PauseMenu({super.key, required this.game});
+
+  final VillageGame game;
+
+  @override
+  Widget build(BuildContext context) => _Screen(
+        color: Colors.black54,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('TẠM DỪNG', style: TextStyle(fontSize: 34, fontWeight: FontWeight.bold, color: _gold)),
+            const SizedBox(height: 14),
+            _bigButton('Tiếp tục', game.closePause),
+            _bigButton('Về menu chính', game.toMenu, color: Colors.blueGrey.shade700),
+            const Text('(Tiến độ được lưu ở đầu mỗi màn)', style: TextStyle(color: Colors.white60, fontSize: 12)),
+          ],
+        ),
+      );
 }
 
 class GameOverScreen extends StatelessWidget {
@@ -505,37 +681,129 @@ class GameOverScreen extends StatelessWidget {
   final VillageGame game;
 
   @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.grey.withValues(alpha: .8),
-      child: Center(
+  Widget build(BuildContext context) => _Screen(
+        color: Colors.grey.withValues(alpha: .8),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const Text('GAME OVER',
                 style: TextStyle(
-                    fontSize: 48,
-                    fontWeight: FontWeight.w900,
-                    color: Colors.white,
-                    letterSpacing: 4,
-                    shadows: [Shadow(blurRadius: 8)])),
+                    fontSize: 48, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 4, shadows: [Shadow(blurRadius: 8)])),
             const SizedBox(height: 6),
-            Text('Màn ${game.stage + 1} • Lv ${game.state.level}',
+            Text('Màn ${game.stageIdx + 1}/${stages.length} • Lv ${game.state.level} • ${game.runKills} quái',
                 style: const TextStyle(color: Colors.white, fontSize: 16)),
-            const SizedBox(height: 22),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                FilledButton(
-                    onPressed: game.restart, child: const Text('Chơi lại')),
-                const SizedBox(width: 12),
-                FilledButton(
-                    style: FilledButton.styleFrom(
-                        backgroundColor: Colors.blueGrey.shade700),
-                    onPressed: game.openSelect,
-                    child: const Text('Chọn nhân vật')),
-              ],
-            ),
+            const SizedBox(height: 18),
+            _bigButton('Thử lại màn', game.retryStage),
+            _bigButton('Chọn nhân vật', game.openSelect, color: const Color(0xFF1565C0)),
+            _bigButton('Về menu', game.toMenu, color: Colors.blueGrey.shade700),
+          ],
+        ),
+      );
+}
+
+class VictoryScreen extends StatelessWidget {
+  const VictoryScreen({super.key, required this.game});
+
+  final VillageGame game;
+
+  String get _time {
+    final s = game.runTime.round();
+    return '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) => _Screen(
+        color: const Color(0xE6102A18),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('CHIẾN THẮNG!',
+                style: TextStyle(fontSize: 44, fontWeight: FontWeight.w900, color: _gold, letterSpacing: 3, shadows: [Shadow(blurRadius: 10)])),
+            const SizedBox(height: 6),
+            Text('${game.player.hero.name} đã quét sạch ${stages.length} màn!', style: const TextStyle(fontSize: 16)),
+            const SizedBox(height: 10),
+            Text('Cấp ${game.state.level} • ${game.runKills} quái • ${game.state.gold} vàng • Thời gian $_time',
+                style: const TextStyle(color: Colors.white70)),
+            const SizedBox(height: 18),
+            _bigButton('Chơi lại', game.openSelect),
+            _bigButton('Về menu', game.toMenu, color: Colors.blueGrey.shade700),
+          ],
+        ),
+      );
+}
+
+class _ShopItem {
+  const _ShopItem(this.id, this.price);
+
+  final ItemId id;
+  final int price;
+}
+
+const _stock = [
+  _ShopItem(ItemId.potion, 30),
+  _ShopItem(ItemId.stone, 70),
+  _ShopItem(ItemId.ironSword, 180),
+  _ShopItem(ItemId.ninjaArmor, 180),
+];
+
+class ShopPanel extends StatefulWidget {
+  const ShopPanel({super.key, required this.game});
+
+  final VillageGame game;
+
+  @override
+  State<ShopPanel> createState() => _ShopPanelState();
+}
+
+class _ShopPanelState extends State<ShopPanel> {
+  String _message = '';
+
+  GameState get s => widget.game.state;
+
+  void _buy(_ShopItem it) {
+    if (s.gold < it.price) {
+      _message = 'Không đủ vàng.';
+    } else if (!s.addItem(it.id)) {
+      _message = 'Túi đầy.';
+    } else {
+      s.gold -= it.price;
+      s.touch();
+      _message = 'Đã mua ${itemDefs[it.id]!.name}.';
+    }
+    setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: s,
+      builder: (context, _) => _PanelFrame(
+        title: 'Cửa hàng',
+        onClose: widget.game.closePanel,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Vàng: ${s.gold}', style: const TextStyle(color: _gold, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            for (final it in _stock)
+              Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(8)),
+                child: Row(children: [
+                  itemIcon(widget.game, it.id),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(itemDefs[it.id]!.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                      Text(itemDefs[it.id]!.desc, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                    ]),
+                  ),
+                  FilledButton(
+                      onPressed: s.gold >= it.price ? () => _buy(it) : null, child: Text('${it.price} vàng')),
+                ]),
+              ),
+            if (_message.isNotEmpty) Text(_message, style: const TextStyle(color: _gold)),
           ],
         ),
       ),

@@ -67,6 +67,11 @@ flutter:
     - assets/images/Hero/
     - assets/images/Ronin/
     - assets/images/monsters/
+    - assets/images/FireWizard/
+    - assets/images/LightningMage/
+    - assets/images/Wanderer/
+    - assets/images/Portraits/
+    - assets/images/Props/
     - assets/images/backgrounds/1/terrace.png
     - assets/images/backgrounds/2/throne room.png
     - assets/images/backgrounds/3/castle.png

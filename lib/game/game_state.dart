@@ -134,6 +134,50 @@ class GameState extends ChangeNotifier {
   int get defense => level + armor.def.power + armor.plus * 2;
 
   void touch() => notifyListeners();
+  // ---- save / load ----
+  Map<String, dynamic> toJson() => {
+        'level': level,
+        'exp': exp,
+        'maxHp': maxHp,
+        'hp': hp,
+        'maxMp': maxMp,
+        'mp': mp,
+        'gold': gold,
+        'bag': [for (final s in bag) _slotJson(s)],
+        'weapon': _slotJson(weapon),
+        'armor': _slotJson(armor),
+        'quests': [
+          for (final q in quests) [q.status.index, q.kills]
+        ],
+      };
+
+  static List<Object> _slotJson(Slot s) => [s.id.name, s.count, s.plus];
+
+  static Slot _slotFrom(List l) =>
+      Slot(ItemId.values.byName(l[0] as String), l[1] as int, l[2] as int);
+
+  void loadJson(Map<String, dynamic> j) {
+    level = j['level'] as int;
+    exp = j['exp'] as int;
+    maxHp = j['maxHp'] as int;
+    hp = j['hp'] as int;
+    maxMp = j['maxMp'] as int;
+    mp = j['mp'] as int;
+    gold = j['gold'] as int;
+    bag
+      ..clear()
+      ..addAll([for (final s in j['bag'] as List) _slotFrom(s as List)]);
+    weapon = _slotFrom(j['weapon'] as List);
+    armor = _slotFrom(j['armor'] as List);
+    final qs = j['quests'] as List;
+    for (var i = 0; i < quests.length && i < qs.length; i++) {
+      quests[i]
+        ..status = QuestStatus.values[(qs[i] as List)[0] as int]
+        ..kills = (qs[i] as List)[1] as int;
+    }
+    notifyListeners();
+  }
+
 
   // ---- progression ----
   /// Returns true if the player levelled up.
