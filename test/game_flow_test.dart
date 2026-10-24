@@ -41,7 +41,7 @@ void main() {
     }
 
     // Play through every stage with the last hero (a ranged one).
-    await tester.runAsync(() => game.startNew(4));
+    await tester.runAsync(() => game.startNew(3));
     for (var s = 0; s < stages.length; s++) {
       expect(game.stageIdx, s);
       game.state.hp = game.state.maxHp;

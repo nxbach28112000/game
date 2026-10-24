@@ -27,7 +27,6 @@ class CharAnims {
     'Fighter',
     'Samurai',
     'Shinobi',
-    'Ronin',
     'FireWizard',
     'LightningMage',
     'Wanderer',
@@ -93,10 +92,13 @@ const projDefs = {
 class HeroDef {
   const HeroDef(this.name, this.folder, this.speed, this.dmgMul, this.defBonus,
       this.skills, this.blurb,
-      {this.projFolder, this.scale = 1});
+      {this.projFolder});
 
   final String name, folder, blurb;
-  final double speed, dmgMul, scale;
+  final double speed, dmgMul;
+
+  /// Draw scale so every hero stands the same height on screen.
+  double get scale => folderScale[folder] ?? 1;
   final int defBonus;
 
   /// Names of skill slots 0..3 (basic attack, two attacks, guard).
@@ -118,21 +120,18 @@ const heroes = [
   HeroDef('Fighter', 'Fighter', 165, 1.1, 3,
       ['Đánh', 'Đấm', 'Chấn động', 'Giáp sắt'],
       'Trâu bò, giảm thêm sát thương nhận.'),
-  HeroDef('Ronin', 'Ronin', 175, 1.2, 1,
-      ['Đánh', 'Đâm', 'Vòng kiếm', 'Khiên'],
-      'Kiếm khách cân bằng, có khiên và đòn xoáy.'),
   HeroDef('Pháp sư Lửa', 'FireWizard', 150, 1.15, 0,
       ['Hỏa cầu', 'Cầu lửa lớn', 'Phun lửa', 'Lá chắn'],
       'Tầm xa. Bắn hỏa cầu, phun lửa xuyên quái.',
-      projFolder: 'FireWizard', scale: 1.5),
+      projFolder: 'FireWizard'),
   HeroDef('Pháp sư Sét', 'LightningMage', 165, 1.1, 0,
       ['Tia sét', 'Cầu sét', 'Sét lan', 'Lá chắn'],
       'Tầm xa. Di chuyển nhanh, sét xuyên mục tiêu.',
-      projFolder: 'LightningMage', scale: 1.5),
+      projFolder: 'LightningMage'),
   HeroDef('Lữ khách', 'Wanderer', 155, 1.2, 0,
       ['Mũi tên phép', 'Chú thuật', 'Cầu ma thuật', 'Lá chắn'],
       'Tầm xa. Phép thuật cân bằng, sát thương cao.',
-      projFolder: 'Wanderer', scale: 1.5),
+      projFolder: 'Wanderer'),
 ];
 
 class SkillDef {
@@ -151,3 +150,25 @@ const skillDefs = [
   SkillDef(15, 3, 2.2, 140, 'skill', aoe: true),
   SkillDef(12, 8, 0, 0, 'shield', dur: 0), // guard: see Player._shield
 ];
+
+/// The sheets draw their characters at different sizes inside the 128px cell
+/// (melee ~80px, mages ~65px tall). Scaling by this makes every character
+/// the same on-screen height (~80/128 of the cell).
+const folderScale = {
+  'Shinobi': 1.0,
+  'Samurai': 0.99,
+  'Fighter': 0.99,
+  'FireWizard': 1.2,
+  'LightningMage': 1.27,
+  'Wanderer': 1.2,
+};
+
+/// Fraction of the (unscaled) cell a standing character fills, from its feet.
+const folderHeightFrac = {
+  'Shinobi': .617,
+  'Samurai': .633,
+  'Fighter': .633,
+  'FireWizard': .516,
+  'LightningMage': .492,
+  'Wanderer': .516,
+};

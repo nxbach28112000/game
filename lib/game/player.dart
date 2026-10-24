@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flame/components.dart';
 import 'package:flutter/material.dart';
 
+import 'audio/audio.dart';
 import 'common.dart';
 import 'game_state.dart';
 import 'heroes.dart';
@@ -81,6 +82,7 @@ class Player extends PositionComponent with HasGameReference<VillageGame> {
     _grounded = false;
     _vz = jumpSpeed;
     _jumpCd = jumpCooldown;
+    GameAudio.sfx('jump');
     _anim.play('jump', restart: true);
   }
 
@@ -96,6 +98,7 @@ class Player extends PositionComponent with HasGameReference<VillageGame> {
     _cd[slot] = d.cd;
     if (slot == 3) {
       _shield = shieldTime;
+      GameAudio.sfx('shield');
       game.world.add(FloatingText(
           hero.skills[3], position + Vector2(0, -90), Colors.lightGreenAccent));
       return;
@@ -103,6 +106,7 @@ class Player extends PositionComponent with HasGameReference<VillageGame> {
     _active = d;
     _swing = _swingMax = hero.ranged && slot == 2 ? .9 : d.dur;
     _anim.play(d.anim, restart: true);
+    GameAudio.sfx(hero.ranged ? 'cast' : 'swing');
     if (hero.ranged) {
       _castRanged(slot, d);
       return;
@@ -160,11 +164,16 @@ class Player extends PositionComponent with HasGameReference<VillageGame> {
     final base = max(1, dmg - s.defense - hero.defBonus);
     final real = guarded ? max(1, (base * .2).round()) : base;
     s.hp = max(0, s.hp - real);
+    game.fx.burst(position + Vector2(0, -40 - z), guarded ? const Color(0xFF90FFB0) : const Color(0xFFFF4040), 9,
+        speed: 120, life: .4);
+    game.shake(guarded ? 1.5 : 4, .2);
+    GameAudio.sfx(guarded ? 'block' : 'hurt');
     if (!guarded) _anim.play('hurt', restart: true);
     game.world.add(FloatingText(guarded ? 'Chặn -$real' : '-$real',
         position + Vector2(0, -90), guarded ? Colors.lightGreenAccent : Colors.red));
     if (s.hp == 0) {
       dead = true;
+      GameAudio.sfx('dead');
       _deadT = 0;
       _shield = 0;
       _swing = 0;

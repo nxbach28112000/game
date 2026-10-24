@@ -8,26 +8,23 @@ import 'package:flame/input.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'audio/audio.dart';
 import 'common.dart';
 import 'game_state.dart';
 import 'heroes.dart';
 import 'monster.dart';
 import 'player.dart';
 import 'save_store.dart';
+import 'scenery.dart';
 import 'stages.dart';
 
 /// Build with --dart-define=QUICK=true to need only 3 kills per stage.
 const kQuick = bool.fromEnvironment('QUICK');
 
-/// Arena backgrounds (full 3840x2160 scenes scaled to the 800x450 view).
-const backgroundFiles = <(String, String)>[
-  ('Sân thượng', 'backgrounds/1/terrace.png'),
-  ('Phòng ngai vàng', 'backgrounds/2/throne room.png'),
-  ('Lâu đài', 'backgrounds/3/castle.png'),
-  ('Rừng chết', 'backgrounds/4/dead forest.png'),
-];
+/// The flying platform is switched off for now (set true to bring it back).
+const kPlatforms = false;
 
-const _crystalColors = ['red', 'violet', 'blue', 'green'];
+const _crystalColors = ['red', 'red', 'blue', 'violet'];
 
 /// Offline action game: 4 worlds of slime hordes and bosses, 7 heroes, loot,
 /// quests, a shop and checkpoint saves.
@@ -44,6 +41,8 @@ class VillageGame extends FlameGame with KeyboardEvents {
   final GameState state = GameState();
   late final Player player;
   late final Background background;
+  late final ParticleLayer fx;
+  double _shakeT = 0, _shakeAmp = 0;
   late FlyPlatform platform;
   late final JoystickComponent joystick;
   final List<Monster> monsters = [];
@@ -107,9 +106,12 @@ class VillageGame extends FlameGame with KeyboardEvents {
 
     background = Background();
     world.add(background);
+    world.add(SceneFx());
+    fx = ParticleLayer();
+    world.add(fx);
     world.add(ExitArrow());
     platform = FlyPlatform(430, 320);
-    world.add(platform);
+    if (kPlatforms) world.add(platform);
     player = Player()..position = playerStart.clone();
     world.add(player);
 
@@ -137,12 +139,27 @@ class VillageGame extends FlameGame with KeyboardEvents {
       Hud(),
     ]);
     pauseEngine(); // wait on the main menu overlay
+    GameAudio.init();
+    GameAudio.music('menu');
     onReady?.call();
+  }
+
+  /// Screen shake (boss slams, big hits).
+  void shake(double amp, [double dur = .3]) {
+    if (amp >= _shakeAmp || _shakeT <= 0) _shakeAmp = amp;
+    _shakeT = dur;
   }
 
   @override
   void update(double dt) {
     super.update(dt);
+    if (_shakeT > 0) {
+      _shakeT -= dt;
+      final k = _shakeAmp * min(1.0, _shakeT / .25);
+      camera.viewfinder.position = Vector2((rng.nextDouble() - .5) * 2 * k, (rng.nextDouble() - .5) * 2 * k);
+    } else if (!camera.viewfinder.position.isZero()) {
+      camera.viewfinder.position = Vector2.zero();
+    }
     if (!inPlay) return;
     runTime += dt;
     for (var i = _respawns.length - 1; i >= 0; i--) {
@@ -233,6 +250,7 @@ class VillageGame extends FlameGame with KeyboardEvents {
       overlays.remove(o);
     }
     overlays.add('menu');
+    GameAudio.music('menu');
     pauseEngine();
   }
 
@@ -266,6 +284,7 @@ class VillageGame extends FlameGame with KeyboardEvents {
     }
     monsters.clear();
     _respawns.clear();
+    fx.clear();
     for (final c in [
       ...world.children.whereType<Drop>(),
       ...world.children.whereType<Projectile>(),
@@ -285,7 +304,7 @@ class VillageGame extends FlameGame with KeyboardEvents {
     platform.removeFromParent();
     final spot = FlyPlatform.spots[stageIdx % FlyPlatform.spots.length];
     platform = FlyPlatform(spot.$1, spot.$2);
-    world.add(platform);
+    if (kPlatforms) world.add(platform);
     player.reset(selectedHero);
     _spawnProps();
     final boss = stageDef.boss;
@@ -301,7 +320,7 @@ class VillageGame extends FlameGame with KeyboardEvents {
         _spawnMonster();
       }
     }
-    for (var i = 0; i < 2; i++) {
+    for (var i = 0; i < (kPlatforms ? 2 : 0); i++) {
       _spawnMonster(onPlatform: true);
     }
     if (checkpoint) {
@@ -312,6 +331,8 @@ class VillageGame extends FlameGame with KeyboardEvents {
         boss != null ? 'BOSS: ${boss.name}' : 'Màn ${stageIdx + 1}: ${stageDef.name}',
         Vector2(400, 140),
         boss != null ? Colors.redAccent : Colors.yellow));
+    GameAudio.music(boss != null ? 'boss' : 'w${stageDef.bg + 1}');
+    GameAudio.sfx(boss != null ? 'roar' : 'stage');
     _changing = false;
   }
 
@@ -340,6 +361,8 @@ class VillageGame extends FlameGame with KeyboardEvents {
       ..remove('quests')
       ..remove('shop')
       ..add('gameover');
+    GameAudio.music(null);
+    GameAudio.sfx('gameover');
     pauseEngine();
   }
 
@@ -355,20 +378,30 @@ class VillageGame extends FlameGame with KeyboardEvents {
       ..remove('quests')
       ..remove('shop')
       ..add('victory');
+    GameAudio.music(null);
+    GameAudio.sfx('victory');
     pauseEngine();
   }
 
   void _spawnProps() {
+    // Glowing crystals suit the dark scenes; the dead forest also gets a few
+    // withered bushes (darkened so they do not pop against the background).
     final crystal = _crystalColors[stageDef.bg];
-    for (var i = 0; i < 7; i++) {
-      final isCrystal = i < 3;
-      final file = isCrystal
-          ? 'Props/crystal_$crystal${const [1, 3, 5][rng.nextInt(3)]}.png'
-          : 'Props/bush${1 + rng.nextInt(10)}.png';
-      final spriteScale = isCrystal ? .5 + rng.nextDouble() * .25 : .6 + rng.nextDouble() * .3;
-      world.add(Prop(sprite(file), spriteScale)
-        ..position = Vector2(
-            30 + rng.nextDouble() * (worldWidth - 60), groundTop + 45 + rng.nextDouble() * (groundBottom - groundTop - 45)));
+    const tints = [Color(0xFFE0A0A8), Color(0xFFE0A0A8), Color(0xFF9CB8FF), Color(0xFFC8A0FF)];
+    const glows = [Color(0xFFFF4A5A), Color(0xFFFF3A4A), Color(0xFF5A8CFF), Color(0xFFA05AFF)];
+    for (var i = 0; i < 5; i++) {
+      final left = i.isEven;
+      final x = left ? 24 + rng.nextDouble() * 150 : 626 + rng.nextDouble() * 150;
+      final img = images.fromCache('Props/crystal_$crystal${const [1, 3, 5][rng.nextInt(3)]}.png');
+      world.add(Prop(img, .4 + rng.nextDouble() * .25, tints[stageDef.bg], glows[stageDef.bg])
+        ..position = Vector2(x, groundTop + 70 + rng.nextDouble() * (groundBottom - groundTop - 80)));
+    }
+    if (stageDef.bg == 3) {
+      for (var i = 0; i < 3; i++) {
+        final img = images.fromCache('Props/bush${1 + rng.nextInt(10)}.png');
+        world.add(Prop(img, .5 + rng.nextDouble() * .2, const Color(0xFF6E5E70), const Color(0xFF402030))
+          ..position = Vector2(40 + rng.nextDouble() * 720, groundTop + 80 + rng.nextDouble() * 140));
+      }
     }
   }
 
@@ -399,6 +432,7 @@ class VillageGame extends FlameGame with KeyboardEvents {
       }
     }
     state.touch();
+    if (portalOpen || m.isBoss) GameAudio.sfx('portal');
     final gold = m.goldDrop;
     state.gold += gold;
     world.add(FloatingText('+$gold vàng', m.position + Vector2(0, -50), const Color(0xFFFFD54F)));
@@ -454,6 +488,7 @@ class VillageGame extends FlameGame with KeyboardEvents {
     if (!state.usePotion()) {
       world.add(FloatingText('Không dùng được', player.position + Vector2(0, -90), Colors.white));
     } else {
+      GameAudio.sfx('heal');
       world.add(FloatingText('+HP', player.position + Vector2(0, -90), Colors.greenAccent));
     }
   }
@@ -508,65 +543,6 @@ class VillageGame extends FlameGame with KeyboardEvents {
     }
     return KeyEventResult.handled;
   }
-}
-
-class Background extends Component with HasGameReference<VillageGame> {
-  Background() : super(priority: -10000);
-
-  int index = 0;
-  ui.Image? _image;
-  final _paint = Paint()..filterQuality = FilterQuality.medium;
-
-  String get name => backgroundFiles[index].$1;
-
-  @override
-  Future<void> onLoad() => _load(0);
-
-  int _req = 0;
-
-  /// Keeps one big scene in memory; a newer request wins over a slower older
-  /// one, and the previous scene is only freed after the new one is in use.
-  Future<void> _load(int i) async {
-    final mine = ++_req;
-    final file = backgroundFiles[i].$2;
-    final image = await game.images.load(file);
-    if (mine != _req) {
-      if (i != index) game.images.clear(file);
-      return;
-    }
-    final old = index;
-    index = i;
-    _image = image;
-    if (old != i) game.images.clear(backgroundFiles[old].$2);
-  }
-
-  Future<void> setIndex(int i) => _load(i);
-
-  @override
-  void render(Canvas canvas) {
-    final img = _image;
-    if (img == null) return;
-    canvas.drawImageRect(img, Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble()),
-        const Rect.fromLTWH(0, 0, VillageGame.worldWidth, VillageGame.worldHeight), _paint);
-  }
-}
-
-/// Scenery (bushes, crystals) sorted by depth with the characters.
-class Prop extends PositionComponent {
-  Prop(this._sprite, double scale) : super(anchor: Anchor.bottomCenter) {
-    size = _sprite.srcSize * scale;
-  }
-
-  final Sprite _sprite;
-
-  @override
-  void onMount() {
-    super.onMount();
-    priority = y.toInt() - 2;
-  }
-
-  @override
-  void render(Canvas canvas) => _sprite.render(canvas, size: size, overridePaint: pixelPaint);
 }
 
 /// Round on-screen button (skill or support) with cooldown pie and key hint.
@@ -663,7 +639,7 @@ class FlyPlatform extends PositionComponent with HasGameReference<VillageGame> {
   double get right => x + slabWidth / 2;
 
   /// Platform top height if [p] is over it, else 0.
-  double heightAt(Vector2 p) => p.x >= left && p.x <= right && (p.y - y).abs() <= 26 ? topHeight : 0;
+  double heightAt(Vector2 p) => kPlatforms && p.x >= left && p.x <= right && (p.y - y).abs() <= 26 ? topHeight : 0;
 
   @override
   void update(double dt) {
@@ -741,6 +717,7 @@ class Drop extends PositionComponent with HasGameReference<VillageGame> {
     if (!game.player.dead && position.distanceTo(game.player.position) < 36) {
       if (game.state.addItem(id)) {
         game.world.add(FloatingText('+${itemDefs[id]!.name}', position + Vector2(0, -30), const Color(0xFF80DEEA)));
+        GameAudio.sfx('pickup');
         removeFromParent();
       } else if (_warn <= 0) {
         _warn = 2;
@@ -752,6 +729,20 @@ class Drop extends PositionComponent with HasGameReference<VillageGame> {
   @override
   void render(Canvas canvas) {
     canvas.drawOval(const Rect.fromLTWH(4, 24, 20, 6), Paint()..color = Colors.black26);
+    // A coloured glow so loot reads clearly against the dark scenery.
+    final glow = switch (id) {
+      ItemId.potion => const Color(0xFFFF4A5A),
+      ItemId.stone => const Color(0xFF5AAEFF),
+      ItemId.gel => const Color(0xFF6CFF86),
+      _ => const Color(0xFFFFCC50),
+    };
+    final gc = Offset(14, 10 - (sin(_t * 4) + 1) * 2);
+    canvas.drawCircle(
+        gc,
+        26,
+        Paint()
+          ..blendMode = BlendMode.plus
+          ..shader = ui.Gradient.radial(gc, 26, [glow.withValues(alpha: .55 + .15 * sin(_t * 5)), glow.withValues(alpha: 0)]));
     _sprite.render(canvas, position: Vector2(0, -4 - (sin(_t * 4) + 1) * 3), size: size, overridePaint: pixelPaint);
   }
 }

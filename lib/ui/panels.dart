@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
+import '../game/audio/audio.dart';
 import '../game/game_state.dart';
 import '../game/heroes.dart';
 import '../game/save_store.dart';
@@ -57,6 +59,11 @@ class HudButtons extends StatelessWidget {
             _btn('Nhiệm vụ (Q)${game.state.hasQuestAttention ? ' !' : ''}',
                 () => game.openPanel('quests')),
             _btn('Cửa hàng (B)', () => game.openPanel('shop')),
+            ValueListenableBuilder<bool>(
+              valueListenable: GameAudio.mutedNotifier,
+              builder: (context, muted, _) =>
+                  _btn(muted ? '♪ Tắt' : '♪ Bật', () => GameAudio.setMuted(!muted)),
+            ),
             _btn('Dừng (P)', game.openPause),
           ],
         ),
@@ -386,19 +393,54 @@ class _QuestPanelState extends State<QuestPanel> {
 
 /// Paints the first frame of a hero's Idle sheet (128px frames).
 class _HeroPainter extends CustomPainter {
-  _HeroPainter(this.image, [this.zoom = 1]);
+  _HeroPainter(this.image, [this.zoom = 1, this.frame = 0]);
+
+  final ui.Image image;
+  final double zoom;
+  final int frame;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawImageRect(image, Rect.fromLTWH(frame * 128.0 + 64 - 64 / zoom, 128 - 128 / zoom, 128 / zoom, 128 / zoom), Offset.zero & size,
+        Paint()..filterQuality = FilterQuality.none);
+  }
+
+  @override
+  bool shouldRepaint(_HeroPainter old) => old.image != image || old.frame != frame;
+}
+
+/// A hero's Idle sheet played as a looping animation.
+class _IdleHero extends StatefulWidget {
+  const _IdleHero({required this.image, required this.zoom});
 
   final ui.Image image;
   final double zoom;
 
   @override
-  void paint(Canvas canvas, Size size) {
-    canvas.drawImageRect(image, Rect.fromLTWH(64 - 64 / zoom, 128 - 128 / zoom, 128 / zoom, 128 / zoom), Offset.zero & size,
-        Paint()..filterQuality = FilterQuality.none);
+  State<_IdleHero> createState() => _IdleHeroState();
+}
+
+class _IdleHeroState extends State<_IdleHero> {
+  Timer? _timer;
+  int _frame = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(milliseconds: 140), (_) {
+      if (mounted) setState(() => _frame++);
+    });
   }
 
   @override
-  bool shouldRepaint(_HeroPainter old) => old.image != image;
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      CustomPaint(painter: _HeroPainter(widget.image, widget.zoom, _frame % (widget.image.width ~/ 128)));
 }
 
 /// Full-screen backdrop used by the menu style screens.
@@ -431,7 +473,12 @@ Widget _bigButton(String label, VoidCallback? onTap, {Color color = const Color(
               disabledBackgroundColor: Colors.white12,
               disabledForegroundColor: Colors.white38,
               padding: const EdgeInsets.symmetric(vertical: 14)),
-          onPressed: onTap,
+          onPressed: onTap == null
+              ? null
+              : () {
+                  GameAudio.sfx('click');
+                  onTap();
+                },
           child: Text(label, style: const TextStyle(fontSize: 16)),
         ),
       ),
@@ -480,6 +527,7 @@ class _MainMenuState extends State<MainMenu> {
       resume = 'Màn ${st + 1}/${stages.length} • $hero • Lv ${(run['state'] as Map)['level']}';
     }
     return _Screen(
+      color: const Color(0x8C070A16),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -517,7 +565,7 @@ class HelpScreen extends StatelessWidget {
     ('L hoặc 2', 'Kỹ năng 2 (attack 3)'),
     ('F hoặc 3', 'Dựng khiên: giảm 80% sát thương'),
     ('Shift giữ / R', 'Chạy (bật/tắt)'),
-    ('X', 'Nhảy: né đòn, nhảy lên sàn bay'),
+    ('X', 'Nhảy: né đòn (đòn đập đất của boss)'),
     ('H', 'Uống bình máu'),
     ('I / Q / B', 'Túi đồ / Nhiệm vụ / Cửa hàng'),
     ('Esc hoặc P', 'Tạm dừng'),
@@ -637,7 +685,7 @@ class _CharacterSelectState extends State<CharacterSelect> {
         ),
         child: Column(
           children: [
-            SizedBox(width: 100, height: 100, child: CustomPaint(painter: _HeroPainter(image, h.scale))),
+            SizedBox(width: 100, height: 100, child: _IdleHero(image: image, zoom: h.scale)),
             Text(h.name, textAlign: TextAlign.center, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _gold)),
             const SizedBox(height: 3),
             Text(h.blurb, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70, fontSize: 11)),
@@ -668,6 +716,12 @@ class PauseMenu extends StatelessWidget {
             const Text('TẠM DỪNG', style: TextStyle(fontSize: 34, fontWeight: FontWeight.bold, color: _gold)),
             const SizedBox(height: 14),
             _bigButton('Tiếp tục', game.closePause),
+            ValueListenableBuilder<bool>(
+              valueListenable: GameAudio.mutedNotifier,
+              builder: (context, muted, _) => _bigButton(
+                  muted ? 'Âm thanh: TẮT' : 'Âm thanh: BẬT', () => GameAudio.setMuted(!muted),
+                  color: const Color(0xFF6A1B9A)),
+            ),
             _bigButton('Về menu chính', game.toMenu, color: Colors.blueGrey.shade700),
             const Text('(Tiến độ được lưu ở đầu mỗi màn)', style: TextStyle(color: Colors.white60, fontSize: 12)),
           ],

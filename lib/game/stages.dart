@@ -50,7 +50,7 @@ const _boss2 = BossDef('Pháp sư Lửa', 'FireWizard', Color(0xFFFFB38A), 2.3, 
     projFolder: 'FireWizard');
 const _boss3 = BossDef('Pháp sư Sét', 'LightningMage', Color(0xFFB8C8FF), 2.3, 'Portraits/boss3.png', 1300, 24,
     projFolder: 'LightningMage');
-const _boss4 = BossDef('Sát thủ Bóng Đêm', 'Ronin', Color(0xFF8C7BFF), 2.1, 'Portraits/boss4.png', 1700, 32);
+const _boss4 = BossDef('Sát thủ Bóng Đêm', 'Shinobi', Color(0xFF9A7BFF), 2.1, 'Portraits/boss4.png', 1700, 32);
 
 /// 4 worlds x (50-kill stage + boss) = 8 stages.
 const stages = [

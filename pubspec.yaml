@@ -65,17 +65,13 @@ flutter:
     - assets/images/Samurai/
     - assets/images/Shinobi/
     - assets/images/Hero/
-    - assets/images/Ronin/
     - assets/images/monsters/
     - assets/images/FireWizard/
     - assets/images/LightningMage/
     - assets/images/Wanderer/
     - assets/images/Portraits/
     - assets/images/Props/
-    - assets/images/backgrounds/1/terrace.png
-    - assets/images/backgrounds/2/throne room.png
-    - assets/images/backgrounds/3/castle.png
-    - assets/images/backgrounds/4/dead forest.png
+    - assets/images/bg/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

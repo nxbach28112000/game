@@ -1,6 +1,7 @@
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 
+import 'game/audio/audio.dart';
 import 'game/village_game.dart';
 import 'ui/panels.dart';
 
@@ -31,7 +32,10 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => GameWidget<VillageGame>(
+  Widget build(BuildContext context) => Listener(
+        // Browsers keep audio locked until the first tap/click.
+        onPointerDown: (_) => GameAudio.unlock(),
+        child: GameWidget<VillageGame>(
         game: game,
         initialActiveOverlays: const ['menu'],
         overlayBuilderMap: {
@@ -45,5 +49,5 @@ class _GameScreenState extends State<GameScreen> {
           'gameover': (context, g) => GameOverScreen(game: g),
           'victory': (context, g) => VictoryScreen(game: g),
         },
-      );
+      ));
 }

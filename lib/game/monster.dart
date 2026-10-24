@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flame/components.dart';
 import 'package:flutter/material.dart';
 
+import 'audio/audio.dart';
 import 'common.dart';
 import 'heroes.dart';
 import 'stages.dart';
@@ -13,13 +14,19 @@ class Monster extends PositionComponent with HasGameReference<VillageGame> {
       : maxHp = boss?.hp ?? _baseHp(kind, stageIdx),
         super(
             size: boss != null
-                ? Vector2.all(100 * boss.scale)
-                : (kind.isSprite ? Vector2(48, 48) : Vector2.all(100)),
+                ? Vector2.all(100 * boss.scale * (folderScale[boss.folder] ?? 1))
+                : (kind.isSprite
+                    ? Vector2(48, 48)
+                    : Vector2.all(100 * (folderScale[_folderOf(kind)] ?? 1))),
             anchor: Anchor.bottomCenter) {
     hp = maxHp;
     _addCd = 6;
     _slamCd = 4;
   }
+
+  static String _folderOf(EnemyKind k) => k == EnemyKind.brute ? 'Fighter' : 'Wanderer';
+
+  String get _folder => boss?.folder ?? _folderOf(kind);
 
   static int _baseHp(EnemyKind k, int st) => switch (k) {
         EnemyKind.brute => 120 + st * 35,
@@ -88,8 +95,7 @@ class Monster extends PositionComponent with HasGameReference<VillageGame> {
   @override
   Future<void> onLoad() async {
     if (human) {
-      final folder = boss?.folder ?? (kind == EnemyKind.brute ? 'Fighter' : 'Wanderer');
-      _anim = CharAnims(game, folder);
+      _anim = CharAnims(game, _folder);
       _paint = tintPaint(boss?.tint ??
           (kind == EnemyKind.brute
               ? const Color(0xFFFF9A9A)
@@ -116,12 +122,25 @@ class Monster extends PositionComponent with HasGameReference<VillageGame> {
     }
     game.world.add(FloatingText(
         '$dmg', position + Vector2(0, human ? -size.y * .7 : -50), Colors.white));
+    final spot = position + Vector2(0, human ? -size.y * .45 : -22);
+    game.fx.burst(spot, human ? const Color(0xFFFFE0A0) : const Color(0xFFFFB060), 7, speed: 110, life: .35);
+    GameAudio.sfx('hit');
+    if (isBoss) game.shake(2.5, .12);
     if (isBoss && !_enraged && hp < maxHp * .5) {
       _enraged = true;
       game.world.add(FloatingText('GIẬN DỮ!', position + Vector2(0, -size.y), Colors.redAccent));
     }
     if (hp <= 0) {
+      game.fx.burst(spot, human ? const Color(0xFFFF9060) : const Color(0xFFFFC060), 22, speed: 190, life: .7, size: 3);
+      GameAudio.sfx('kill');
+      if (isBoss) {
+        game.shake(10, .6);
+        GameAudio.sfx('roar');
+        game.fx.ring(position.clone(), Colors.orangeAccent, count: 40, speed: 220);
+      }
       if (game.state.gainExp(exp)) {
+        GameAudio.sfx('levelup');
+        game.fx.ring(game.player.position.clone(), const Color(0xFFFFE070));
         game.world.add(FloatingText('LEVEL UP!',
             game.player.position + Vector2(0, -110), Colors.yellow));
       }
@@ -211,6 +230,7 @@ class Monster extends PositionComponent with HasGameReference<VillageGame> {
     if (to.x.abs() > 4) _faceRight = to.x > 0;
     if (isBoss && _slamCd <= 0 && dist < 320) {
       _slamWind = _slamTime;
+      GameAudio.sfx('warn');
       _slamCd = _enraged ? 4.5 : 6.5;
       game.world.add(FloatingText('!', position + Vector2(0, -size.y), Colors.redAccent));
       return;
@@ -241,6 +261,7 @@ class Monster extends PositionComponent with HasGameReference<VillageGame> {
       _atkCd = isBoss ? (_enraged ? 1.5 : 2.2) : 2.4;
       _atkAnim = .4;
       _anim?.play('attack', restart: true);
+      GameAudio.sfx('cast');
       final dir = _faceRight ? 1.0 : -1.0;
       final def = projDefs[boss?.projFolder ?? 'Wanderer']!;
       for (final vy in isBoss ? const [-75.0, 0.0, 75.0] : const [0.0]) {
@@ -260,6 +281,9 @@ class Monster extends PositionComponent with HasGameReference<VillageGame> {
 
   void _slam() {
     _slamFlash = .3;
+    game.shake(8, .4);
+    GameAudio.sfx('slam');
+    game.fx.ring(position.clone(), const Color(0xFFFFB070), count: 44, speed: 260);
     final p = game.player;
     final dx = (p.x - x) / _slamRadius, dy = (p.y - y) / (_slamRadius * .45);
     game.world.add(FloatingText('RẦM!', position + Vector2(0, -size.y), Colors.orangeAccent));
@@ -305,7 +329,7 @@ class Monster extends PositionComponent with HasGameReference<VillageGame> {
     }
     if (!isBoss && !_dying) {
       final barX = (size.x - 40) / 2;
-      final barY = human ? size.y * .28 : -6.0;
+      final barY = human ? size.y * (1 - (folderHeightFrac[_folder] ?? .6)) - 8 : -6.0;
       canvas.drawRect(Rect.fromLTWH(barX, barY, 40, 5), Paint()..color = Colors.black54);
       canvas.drawRect(Rect.fromLTWH(barX, barY, 40 * max(0, hp) / maxHp, 5),
           Paint()..color = Colors.redAccent);
@@ -381,6 +405,13 @@ class Projectile extends PositionComponent with HasGameReference<VillageGame> {
   void _explode() {
     _exploding = true;
     _t = 0;
+    final color = switch (def.folder) {
+      'FireWizard' => const Color(0xFFFF8A30),
+      'LightningMage' => const Color(0xFFFFE850),
+      _ => const Color(0xFF8AB8FF),
+    };
+    game.fx.burst(Vector2(x, y - z), color, 12, speed: 140, life: .4);
+    GameAudio.sfx('boom');
   }
 
   @override
