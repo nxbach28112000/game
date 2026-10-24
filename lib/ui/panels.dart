@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 import '../game/audio/audio.dart';
+import '../game/button_layout.dart';
 import '../game/game_state.dart';
 import '../game/heroes.dart';
 import '../game/save_store.dart';
@@ -64,6 +65,7 @@ class HudButtons extends StatelessWidget {
               builder: (context, muted, _) =>
                   _btn(muted ? '♪ Tắt' : '♪ Bật', () => GameAudio.setMuted(!muted)),
             ),
+            _btn('⚙', game.openSettings),
             _btn('Dừng (P)', game.openPause),
           ],
         ),
@@ -543,6 +545,7 @@ class _MainMenuState extends State<MainMenu> {
           _bigButton('Chơi mới', _busy ? null : widget.game.openSelect),
           _bigButton('Tiếp tục', run == null || _busy ? null : _continue, color: const Color(0xFF1565C0)),
           if (resume != null) Text(resume, style: const TextStyle(color: Colors.white60, fontSize: 12)),
+          _bigButton('Cài đặt', widget.game.openSettings, color: const Color(0xFF1565C0)),
           _bigButton('Hướng dẫn', () => setState(() => _help = true), color: Colors.blueGrey.shade700),
           const SizedBox(height: 12),
           Text('Kỷ lục: màn ${_rec['bestStage']}/${stages.length}  •  ${_rec['kills']} quái đã diệt  •  ${_rec['wins']} lần thắng',
@@ -563,8 +566,7 @@ class HelpScreen extends StatelessWidget {
     ('Space hoặc J', 'Đánh thường (attack 1)'),
     ('K hoặc 1', 'Kỹ năng 1 (attack 2)'),
     ('L hoặc 2', 'Kỹ năng 2 (attack 3)'),
-    ('F hoặc 3', 'Dựng khiên: giảm 80% sát thương'),
-    ('Shift giữ / R', 'Chạy (bật/tắt)'),
+    ('Shift giữ / R', 'Chạy (bật/tắt), chạy liên tục tốn MP'),
     ('X', 'Nhảy: né đòn (đòn đập đất của boss)'),
     ('H', 'Uống bình máu'),
     ('I / Q / B', 'Túi đồ / Nhiệm vụ / Cửa hàng'),
@@ -582,8 +584,8 @@ class HelpScreen extends StatelessWidget {
               const Text('HƯỚNG DẪN', style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: _gold)),
               const SizedBox(height: 10),
               const Text(
-                  'Diệt 50 quái mỗi màn để mở mũi tên bên phải, rồi đánh bại boss của thế giới. '
-                  'Hạ boss cuối để thắng. Hết máu là thua (có thể thử lại màn từ điểm lưu).',
+                  'Hạ đủ 10 x số màn quái để gọi boss, đánh bại boss rồi đi sang phải để qua màn. Lên cấp mỗi 20, 30, 40... quái (+15% chỉ số). '
+                  'Hạ boss cuối để thắng. Hết máu có thể hồi sinh tối đa 2 lần mỗi lượt chơi.',
                   style: TextStyle(color: Colors.white70)),
               const SizedBox(height: 10),
               for (final r in _rows)
@@ -722,6 +724,7 @@ class PauseMenu extends StatelessWidget {
                   muted ? 'Âm thanh: TẮT' : 'Âm thanh: BẬT', () => GameAudio.setMuted(!muted),
                   color: const Color(0xFF6A1B9A)),
             ),
+            _bigButton('Cài đặt', game.openSettings, color: const Color(0xFF1565C0)),
             _bigButton('Về menu chính', game.toMenu, color: Colors.blueGrey.shade700),
             const Text('(Tiến độ được lưu ở đầu mỗi màn)', style: TextStyle(color: Colors.white60, fontSize: 12)),
           ],
@@ -735,24 +738,32 @@ class GameOverScreen extends StatelessWidget {
   final VillageGame game;
 
   @override
-  Widget build(BuildContext context) => _Screen(
-        color: Colors.grey.withValues(alpha: .8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('GAME OVER',
-                style: TextStyle(
-                    fontSize: 48, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 4, shadows: [Shadow(blurRadius: 8)])),
-            const SizedBox(height: 6),
-            Text('Màn ${game.stageIdx + 1}/${stages.length} • Lv ${game.state.level} • ${game.runKills} quái',
-                style: const TextStyle(color: Colors.white, fontSize: 16)),
-            const SizedBox(height: 18),
-            _bigButton('Thử lại màn', game.retryStage),
-            _bigButton('Chọn nhân vật', game.openSelect, color: const Color(0xFF1565C0)),
-            _bigButton('Về menu', game.toMenu, color: Colors.blueGrey.shade700),
-          ],
-        ),
-      );
+  Widget build(BuildContext context) {
+    final left = game.revivesLeft;
+    return _Screen(
+      color: Colors.grey.withValues(alpha: .8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('GAME OVER',
+              style: TextStyle(
+                  fontSize: 48, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 4, shadows: [Shadow(blurRadius: 8)])),
+          const SizedBox(height: 6),
+          Text('Màn ${game.stageIdx + 1}/${stages.length} • Lv ${game.state.level} • ${game.runKills} quái',
+              style: const TextStyle(color: Colors.white, fontSize: 16)),
+          const SizedBox(height: 18),
+          if (left > 0)
+            _bigButton('Hồi sinh (còn $left lần)', game.revive)
+          else
+            const Padding(
+              padding: EdgeInsets.only(bottom: 6),
+              child: Text('Đã hết lượt hồi sinh', style: TextStyle(color: Colors.white, fontSize: 15)),
+            ),
+          _bigButton('Về trang chủ', game.toMenu, color: Colors.blueGrey.shade700),
+        ],
+      ),
+    );
+  }
 }
 
 class VictoryScreen extends StatelessWidget {
@@ -860,6 +871,176 @@ class _ShopPanelState extends State<ShopPanel> {
             if (_message.isNotEmpty) Text(_message, style: const TextStyle(color: _gold)),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Sound toggle and the entry to the button layout editor.
+class SettingsScreen extends StatelessWidget {
+  const SettingsScreen({super.key, required this.game});
+
+  final VillageGame game;
+
+  @override
+  Widget build(BuildContext context) => _Screen(
+        color: const Color(0xE6101626),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('CÀI ĐẶT', style: TextStyle(fontSize: 30, fontWeight: FontWeight.bold, color: _gold)),
+            const SizedBox(height: 14),
+            ValueListenableBuilder<bool>(
+              valueListenable: GameAudio.mutedNotifier,
+              builder: (context, muted, _) => _bigButton(
+                  muted ? 'Âm thanh: TẮT' : 'Âm thanh: BẬT', () => GameAudio.setMuted(!muted),
+                  color: const Color(0xFF6A1B9A)),
+            ),
+            _bigButton('Tùy chỉnh giao diện nút', () => game.overlays.add('layout'), color: const Color(0xFF1565C0)),
+            const SizedBox(height: 6),
+            _bigButton('Đóng', game.closeSettings, color: Colors.blueGrey.shade700),
+          ],
+        ),
+      );
+}
+
+/// Drag the on-screen buttons where you want them, then save. The layout is
+/// stored on the device.
+class LayoutEditor extends StatefulWidget {
+  const LayoutEditor({super.key, required this.game});
+
+  final VillageGame game;
+
+  @override
+  State<LayoutEditor> createState() => _LayoutEditorState();
+}
+
+class _LayoutEditorState extends State<LayoutEditor> {
+  late ButtonLayout _draft = widget.game.layout.copy();
+  String? _drag;
+  bool _saved = false;
+
+  static const _w = 800.0, _h = 450.0;
+
+  void _grab(Offset p) {
+    String? best;
+    var bestD = double.infinity;
+    for (final e in _draft.pos.entries) {
+      final d = (Offset(e.value.$1, e.value.$2) - p).distance;
+      if (d < ButtonLayout.radius[e.key]! + 14 && d < bestD) {
+        best = e.key;
+        bestD = d;
+      }
+    }
+    _drag = best;
+  }
+
+  void _move(Offset p) {
+    final id = _drag;
+    if (id == null) return;
+    final r = ButtonLayout.radius[id]!;
+    setState(() {
+      _draft.pos[id] = (p.dx.clamp(r, _w - r).toDouble(), p.dy.clamp(r, _h - r).toDouble());
+      _saved = false;
+    });
+  }
+
+  Future<void> _save() async {
+    widget.game.layout = _draft.copy();
+    await widget.game.layout.save();
+    widget.game.applyLayout();
+    if (mounted) setState(() => _saved = true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xF2080C18),
+      child: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: Row(children: [
+                const Text('Kéo các nút đến vị trí mong muốn', style: TextStyle(color: _gold, fontSize: 16, fontWeight: FontWeight.bold)),
+                const Spacer(),
+                TextButton(
+                    onPressed: () => setState(() {
+                          _draft = ButtonLayout({});
+                          _saved = false;
+                        }),
+                    child: const Text('Mặc định', style: TextStyle(color: Colors.white70))),
+                const SizedBox(width: 6),
+                FilledButton(
+                    style: FilledButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
+                    onPressed: _save,
+                    child: Text(_saved ? 'Đã lưu ✔' : 'Lưu')),
+                const SizedBox(width: 6),
+                FilledButton(
+                    style: FilledButton.styleFrom(backgroundColor: Colors.blueGrey.shade700),
+                    onPressed: () => widget.game.overlays.remove('layout'),
+                    child: const Text('Quay lại')),
+              ]),
+            ),
+            Expanded(
+              child: Center(
+                child: FittedBox(
+                  fit: BoxFit.contain,
+                  child: SizedBox(
+                    width: _w,
+                    height: _h,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onPanStart: (d) => _grab(d.localPosition),
+                      onPanUpdate: (d) => _move(d.localPosition),
+                      onPanEnd: (_) => _drag = null,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1B2236),
+                          border: Border.all(color: _gold, width: 2),
+                        ),
+                        child: Stack(children: [
+                          const Positioned(
+                              left: 36,
+                              bottom: 36,
+                              child: CircleAvatar(radius: 50, backgroundColor: Colors.white12, child: Text('Cần\nđiều khiển', textAlign: TextAlign.center, style: TextStyle(color: Colors.white70, fontSize: 12)))),
+                          for (final e in _draft.pos.entries) _circle(e.key, e.value),
+                        ]),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _circle(String id, (double, double) p) {
+    final r = ButtonLayout.radius[id]!;
+    const colors = {
+      'attack': Color(0xFFE53935),
+      'skill1': Color(0xFF1E88E5),
+      'skill2': Color(0xFF7E57C2),
+      'run': Color(0xFFF9A825),
+      'jump': Color(0xFF00ACC1),
+    };
+    return Positioned(
+      left: p.$1 - r,
+      top: p.$2 - r,
+      child: Container(
+        width: r * 2,
+        height: r * 2,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: colors[id]!.withValues(alpha: .85),
+          border: Border.all(color: _drag == id ? Colors.yellowAccent : Colors.white54, width: 3),
+        ),
+        child: Text(ButtonLayout.labels[id]!,
+            textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
       ),
     );
   }

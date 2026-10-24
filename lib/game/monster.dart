@@ -14,106 +14,63 @@ class Monster extends PositionComponent with HasGameReference<VillageGame> {
   Monster(this.kind, this.stageIdx, {this.floor, this.boss})
       : maxHp = boss?.hp ?? _baseHp(kind, stageIdx),
         super(
-            size: boss != null
-                ? Vector2.all(100 * boss.scale * (folderScale[boss.folder] ?? 1))
-                : (kind.isSprite
-                    ? Vector2(48, 48)
-                    : Vector2.all(100 * (folderScale[_folderOf(kind)] ?? 1))),
+            size: Vector2.all(100 * (boss?.scale ?? kind.sizeMul) * (folderScale[boss?.folder ?? kind.folder] ?? 1)),
             anchor: Anchor.bottomCenter) {
     hp = maxHp;
     _addCd = 6;
     _slamCd = 4;
   }
 
-  static String _folderOf(EnemyKind k) => k == EnemyKind.brute ? 'Fighter' : 'Wanderer';
-
-  String get _folder => boss?.folder ?? _folderOf(kind);
-
-  static int _baseHp(EnemyKind k, int st) => switch (k) {
-        EnemyKind.brute => 120 + st * 35,
-        EnemyKind.mage => 70 + st * 25,
-        _ => ((40 + st * 22) * k.hpMul).round(),
-      };
+  /// Regular monster HP climbs steeply with the stage number.
+  static int _baseHp(EnemyKind k, int st) => (k.baseHp * (1 + .5 * st)).round();
 
   final EnemyKind kind;
   final int stageIdx;
+
   /// Set for monsters that live on a raised floor.
   final FloorPlatform? floor;
-
-  bool get onPlatform => floor != null;
   final BossDef? boss;
   final int maxHp;
   late int hp;
 
+  bool get onPlatform => floor != null;
   bool get isBoss => boss != null;
-  bool get human => isBoss || !kind.isSprite;
   bool get ranged => isBoss ? boss!.ranged : kind == EnemyKind.mage;
   bool get dying => _dying;
+  String get _folder => boss?.folder ?? kind.folder;
 
-  /// Height above ground: platform slimes stand on the flying platform.
+  /// Height above ground: floor monsters stand on their floor.
   double get z => floor?.z ?? 0;
-
-  int get exp => isBoss
-      ? 250
-      : switch (kind) {
-          EnemyKind.brute => 30,
-          EnemyKind.mage => 28,
-          _ => kind.exp,
-        };
 
   int get goldDrop {
     final base = 5 + rng.nextInt(11) + stageIdx * 3;
-    return isBoss ? 150 + base * 5 : base * (human ? 2 : 1);
+    return isBoss ? 150 + base * 5 : base * 2;
   }
 
   int get damage {
     final lv = game.state.level;
     if (isBoss) return boss!.dmg + lv * 2 + stageIdx * 2;
-    return switch (kind) {
-      EnemyKind.brute => 16 + lv * 2 + stageIdx * 3,
-      EnemyKind.mage => 14 + lv + stageIdx * 3,
-      _ => ((10 + lv * 2 + stageIdx * 3) * kind.dmgMul).round(),
-    };
+    return kind.baseDmg + lv + stageIdx * 3;
   }
 
   double get _speed {
-    final base = isBoss ? (ranged ? 55.0 : 70.0) : switch (kind) {
-      EnemyKind.brute => 55.0,
-      EnemyKind.mage => 50.0,
-      _ => kind.speed,
-    };
+    final base = isBoss ? (ranged ? 55.0 : 70.0) : kind.speed;
     return _enraged ? base * 1.25 : base;
   }
 
   double _atkCd = 0, _wanderT = 0, _hurtT = 0, _atkAnim = 0;
   double _slamCd = 0, _slamWind = 0, _slamFlash = 0, _addCd = 0, _deadT = 0;
-  double _t = rng.nextDouble() * 5;
   bool _faceRight = true, _moving = false, _dying = false, _enraged = false;
   Vector2 _wander = Vector2.zero();
-  late final List<Sprite> _frames;
-  CharAnims? _anim;
+  late final CharAnims _anim;
   late final Paint _paint;
 
   static const _slamTime = .9, _slamRadius = 130.0;
 
   @override
   Future<void> onLoad() async {
-    if (human) {
-      _anim = CharAnims(game, _folder);
-      _paint = tintPaint(boss?.tint ??
-          (kind == EnemyKind.brute
-              ? const Color(0xFFFF9A9A)
-              : const Color(0xFFD2A8FF)));
-    } else {
-      final file = kind.file!;
-      _frames = switch (kind) {
-        // 3 colour rows (picked by stage) x 3 idle frames, 24px cells.
-        EnemyKind.slime => [for (var i = 0; i < 3; i++) game.sprite(file, i * 24.0, (stageIdx % 3) * 24.0, 24, 24)],
-        // 8 colour rows x 7 walk frames, 32px cells.
-        EnemyKind.goblin => [for (var i = 0; i < 7; i++) game.sprite(file, i * 32.0, (stageIdx % 8) * 32.0, 32, 32)],
-        _ => [game.sprite(file)],
-      };
-    }
+    _anim = CharAnims(game, _folder);
+    _paint = tintPaint(boss?.tint ?? kind.tint);
   }
 
   void hurt(int dmg) {
@@ -121,13 +78,12 @@ class Monster extends PositionComponent with HasGameReference<VillageGame> {
     hp -= dmg;
     if (!isBoss) {
       _hurtT = .25;
-      _anim?.play('hurt', restart: true);
+      _anim.play('hurt', restart: true);
       position.x += (x > game.player.x ? 1 : -1) * 16;
     }
-    game.world.add(FloatingText(
-        '$dmg', position + Vector2(0, human ? -size.y * .7 : -50), Colors.white));
-    final spot = position + Vector2(0, human ? -size.y * .45 : -22);
-    game.fx.burst(spot, human ? const Color(0xFFFFE0A0) : const Color(0xFFFFB060), 7, speed: 110, life: .35);
+    game.world.add(FloatingText('$dmg', position + Vector2(0, -size.y * .7), Colors.white));
+    final spot = position + Vector2(0, -size.y * .45);
+    game.fx.burst(spot, const Color(0xFFFFE0A0), 7, speed: 110, life: .35);
     GameAudio.sfx('hit');
     if (isBoss) game.shake(2.5, .12);
     if (isBoss && !_enraged && hp < maxHp * .5) {
@@ -135,26 +91,16 @@ class Monster extends PositionComponent with HasGameReference<VillageGame> {
       game.world.add(FloatingText('GIẬN DỮ!', position + Vector2(0, -size.y), Colors.redAccent));
     }
     if (hp <= 0) {
-      game.fx.burst(spot, human ? const Color(0xFFFF9060) : const Color(0xFFFFC060), 22, speed: 190, life: .7, size: 3);
+      game.fx.burst(spot, const Color(0xFFFF9060), 22, speed: 190, life: .7, size: 3);
       GameAudio.sfx('kill');
       if (isBoss) {
         game.shake(10, .6);
         GameAudio.sfx('roar');
         game.fx.ring(position.clone(), Colors.orangeAccent, count: 40, speed: 220);
       }
-      if (game.state.gainExp(exp)) {
-        GameAudio.sfx('levelup');
-        game.fx.ring(game.player.position.clone(), const Color(0xFFFFE070));
-        game.world.add(FloatingText('LEVEL UP!',
-            game.player.position + Vector2(0, -110), Colors.yellow));
-      }
       _dying = true;
+      _anim.play('dead', restart: true);
       game.monsterDied(this);
-      if (human) {
-        _anim!.play('dead', restart: true);
-      } else {
-        removeFromParent();
-      }
     }
   }
 
@@ -162,11 +108,10 @@ class Monster extends PositionComponent with HasGameReference<VillageGame> {
   void update(double dt) {
     if (_dying) {
       _deadT += dt;
-      _anim?.update(dt);
+      _anim.update(dt);
       if (_deadT > 1.1) removeFromParent();
       return;
     }
-    _t += dt;
     _atkCd -= dt;
     _hurtT -= dt;
     _atkAnim -= dt;
@@ -212,21 +157,18 @@ class Monster extends PositionComponent with HasGameReference<VillageGame> {
       position.y = position.y.clamp(VillageGame.groundTop + 40, VillageGame.groundBottom);
     }
     priority = y.toInt();
-    final a = _anim;
-    if (a != null) {
-      if (_hurtT > 0) {
-        a.play('hurt');
-      } else if (_atkAnim > 0 || _slamWind > 0) {
-        a.play('attack');
-      } else {
-        a.play(_moving ? 'walk' : 'idle');
-      }
-      a.update(dt);
+    if (_hurtT > 0) {
+      _anim.play('hurt');
+    } else if (_atkAnim > 0 || _slamWind > 0) {
+      _anim.play('attack');
+    } else {
+      _anim.play(_moving ? 'walk' : 'idle');
     }
+    _anim.update(dt);
   }
 
   void _meleeAi(Vector2 to, double dist, double dt) {
-    final reach = isBoss ? 100.0 : (human ? 62.0 : 55.0);
+    final reach = isBoss ? 100.0 : 62.0 * kind.sizeMul;
     if (dist > reach * .7) {
       position += to.normalized() * _speed * dt;
       _moving = true;
@@ -242,7 +184,7 @@ class Monster extends PositionComponent with HasGameReference<VillageGame> {
     if (dist < reach && _atkCd <= 0) {
       _atkCd = isBoss ? (_enraged ? .7 : .95) : 1.2;
       _atkAnim = .35;
-      _anim?.play('attack', restart: true);
+      _anim.play('attack', restart: true);
       game.player.hurt(damage);
     }
   }
@@ -264,7 +206,7 @@ class Monster extends PositionComponent with HasGameReference<VillageGame> {
     if (_atkCd <= 0 && to.x.abs() < 480 && to.y.abs() < 40) {
       _atkCd = isBoss ? (_enraged ? 1.5 : 2.2) : 2.4;
       _atkAnim = .4;
-      _anim?.play('attack', restart: true);
+      _anim.play('attack', restart: true);
       GameAudio.sfx('cast');
       final dir = _faceRight ? 1.0 : -1.0;
       final def = projDefs[boss?.projFolder ?? 'Wanderer']!;
@@ -300,13 +242,9 @@ class Monster extends PositionComponent with HasGameReference<VillageGame> {
     canvas.translate(0, -z);
     if (_slamWind > 0 || _slamFlash > 0) {
       final ring = Rect.fromCenter(
-          center: Offset(size.x / 2, size.y - 4),
-          width: _slamRadius * 2,
-          height: _slamRadius * .9);
+          center: Offset(size.x / 2, size.y - 4), width: _slamRadius * 2, height: _slamRadius * .9);
       final f = _slamWind > 0 ? 1 - _slamWind / _slamTime : 1.0;
-      canvas.drawOval(
-          ring,
-          Paint()..color = Colors.red.withValues(alpha: _slamWind > 0 ? .12 + .25 * f : .5));
+      canvas.drawOval(ring, Paint()..color = Colors.red.withValues(alpha: _slamWind > 0 ? .12 + .25 * f : .5));
       canvas.drawOval(
           ring,
           Paint()
@@ -314,29 +252,13 @@ class Monster extends PositionComponent with HasGameReference<VillageGame> {
             ..style = PaintingStyle.stroke
             ..strokeWidth = 3);
     }
-    if (human) {
-      canvas.drawOval(Rect.fromLTWH(size.x * .28, size.y * .9, size.x * .44, size.y * .12),
-          Paint()..color = Colors.black26);
-      _anim!.render(canvas, size, flip: !_faceRight, paint: _paint);
-    } else {
-      canvas.drawOval(const Rect.fromLTWH(4, 40, 40, 8), Paint()..color = Colors.black26);
-      canvas.save();
-      if (!_faceRight) {
-        canvas.translate(size.x, 0);
-        canvas.scale(-1, 1);
-      }
-      final fly = kind == EnemyKind.bat ? 14 + sin(_t * 6) * 5 : 0.0;
-      final d = kind.drawSize;
-      _frames[(_t * (kind == EnemyKind.goblin ? 8 : 4)).floor() % _frames.length].render(canvas,
-          position: Vector2((size.x - d) / 2, size.y - d - fly), size: Vector2.all(d), overridePaint: pixelPaint);
-      canvas.restore();
-    }
+    canvas.drawOval(Rect.fromLTWH(size.x * .28, size.y * .9, size.x * .44, size.y * .12), Paint()..color = Colors.black26);
+    _anim.render(canvas, size, flip: !_faceRight, paint: _paint);
     if (!isBoss && !_dying) {
       final barX = (size.x - 40) / 2;
-      final barY = human ? size.y * (1 - (folderHeightFrac[_folder] ?? .6)) - 8 : -6.0;
+      final barY = size.y * (1 - (folderHeightFrac[_folder] ?? .6)) - 8;
       canvas.drawRect(Rect.fromLTWH(barX, barY, 40, 5), Paint()..color = Colors.black54);
-      canvas.drawRect(Rect.fromLTWH(barX, barY, 40 * max(0, hp) / maxHp, 5),
-          Paint()..color = Colors.redAccent);
+      canvas.drawRect(Rect.fromLTWH(barX, barY, 40 * max(0, hp) / maxHp, 5), Paint()..color = Colors.redAccent);
     }
     canvas.restore();
   }

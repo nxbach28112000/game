@@ -47,7 +47,6 @@ class CharAnims {
     'skill': ('Attack_3', .07, false),
     'hurt': ('Hurt', .1, false),
     'skill1': ('Attack_2', .08, false),
-    'shield': ('Shield', .12, true),
     'jump': ('Jump', .08, false),
     'dead': ('Dead', .14, false),
   };
@@ -121,25 +120,32 @@ class HeroDef {
 
 const heroes = [
   HeroDef('Shinobi', 'Shinobi', 190, 1.0, 0,
-      ['Đánh', 'Chém nhanh', 'Vòng xoáy', 'Ẩn thân'],
+      ['Đánh', 'Chém nhanh', 'Vòng xoáy'],
       'Nhanh nhẹn, di chuyển linh hoạt.'),
   HeroDef('Samurai', 'Samurai', 150, 1.25, 0,
-      ['Đánh', 'Trảm', 'Kiếm khí', 'Thủ thế'], 'Sát thương cao, tốc độ vừa.'),
+      ['Đánh', 'Trảm', 'Kiếm khí'], 'Sát thương cao, tốc độ vừa.'),
   HeroDef('Fighter', 'Fighter', 165, 1.1, 3,
-      ['Đánh', 'Đấm', 'Chấn động', 'Giáp sắt'],
+      ['Đánh', 'Đấm', 'Chấn động'],
       'Trâu bò, giảm thêm sát thương nhận.'),
   HeroDef('Pháp sư Lửa', 'FireWizard', 150, 1.15, 0,
-      ['Hỏa cầu', 'Cầu lửa lớn', 'Phun lửa', 'Lá chắn'],
+      ['Hỏa cầu', 'Cầu lửa lớn', 'Phun lửa'],
       'Tầm xa. Bắn hỏa cầu, phun lửa xuyên quái.',
       projFolder: 'FireWizard'),
   HeroDef('Pháp sư Sét', 'LightningMage', 165, 1.1, 0,
-      ['Tia sét', 'Cầu sét', 'Sét lan', 'Lá chắn'],
+      ['Tia sét', 'Cầu sét', 'Sét lan'],
       'Tầm xa. Di chuyển nhanh, sét xuyên mục tiêu.',
       projFolder: 'LightningMage'),
   HeroDef('Lữ khách', 'Wanderer', 155, 1.2, 0,
-      ['Mũi tên phép', 'Chú thuật', 'Cầu ma thuật', 'Lá chắn'],
+      ['Mũi tên phép', 'Chú thuật', 'Cầu ma thuật'],
       'Tầm xa. Phép thuật cân bằng, sát thương cao.',
       projFolder: 'Wanderer'),
+  // The knight sheets have three different attacks, so they are heroes.
+  HeroDef('Hiệp sĩ Thép', 'Knight1', 150, 1.3, 4, ['Chém', 'Chém ngang', 'Bão kiếm'],
+      'Giáp dày, 3 kiểu chém liên hoàn.'),
+  HeroDef('Hiệp sĩ Đỏ', 'Knight2', 160, 1.35, 2, ['Chém', 'Chém ngang', 'Bão kiếm'],
+      'Cân bằng giữa công và thủ.'),
+  HeroDef('Hiệp sĩ Đen', 'Knight3', 170, 1.4, 1, ['Chém', 'Chém ngang', 'Bão kiếm'],
+      'Nhanh và hung hãn.'),
 ];
 
 class SkillDef {
@@ -156,7 +162,6 @@ const skillDefs = [
   SkillDef(0, .4, 1, 80, 'attack'),
   SkillDef(8, 1.5, 1.7, 95, 'skill1', dur: .3),
   SkillDef(15, 3, 2.2, 140, 'skill', aoe: true),
-  SkillDef(12, 8, 0, 0, 'shield', dur: 0), // guard: see Player._shield
 ];
 
 /// The sheets draw their characters at different sizes inside the 128px cell

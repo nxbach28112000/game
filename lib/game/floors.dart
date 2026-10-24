@@ -19,16 +19,18 @@ class FloorPlatform extends PositionComponent with HasGameReference<VillageGame>
     required this.z,
     required this.style,
     required this.tint,
+    this.seed = 0,
   }) : super(position: Vector2(cx, depth), size: Vector2(floorW, 20), anchor: Anchor.bottomCenter);
 
   /// Floors must be at least 40% of the 800px screen wide.
   static const minWidth = 320.0;
 
   /// How far (in depth) from the floor's lane a hero can still stand on it.
-  static const laneTolerance = 34.0;
+  static const laneTolerance = 120.0;
 
   final double floorW, z;
   final int style; // 0 grass ground, 1 wooden scaffold, 2 stone slabs
+  final int seed; // decorations are fixed per stage
   final Color tint;
 
   double get left => x - floorW / 2;
@@ -44,6 +46,7 @@ class FloorPlatform extends PositionComponent with HasGameReference<VillageGame>
 
   @override
   Future<void> onLoad() async {
+    final rng = Random(seed);
     priority = (y - z).toInt() - 1; // behind every character standing lower
     switch (style) {
       case 0:

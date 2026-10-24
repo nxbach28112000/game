@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'audio/audio.dart';
+import 'button_layout.dart';
 import 'common.dart';
 import 'floors.dart';
 import 'game_state.dart';
@@ -42,6 +43,11 @@ class VillageGame extends FlameGame with KeyboardEvents {
   late final ParticleLayer fx;
   double _shakeT = 0, _shakeAmp = 0;
   final floors = <FloorPlatform>[];
+  late ButtonLayout layout;
+  Map<String, ActionButton> _buttons = {};
+
+  /// Revives left in this run (max 2).
+  int revivesLeft = 2;
   late final JoystickComponent joystick;
   final List<Monster> monsters = [];
   final Set<LogicalKeyboardKey> _keys = {};
@@ -62,7 +68,6 @@ class VillageGame extends FlameGame with KeyboardEvents {
 
   /// Fired once assets are loaded (the debug entry uses it to auto-start).
   VoidCallback? onReady;
-  Map<String, dynamic>? _checkpoint;
 
   /// Pending monster respawns: (seconds left, floor index or -1, stage index).
   final _respawns = <(double, int, int)>[];
@@ -72,15 +77,25 @@ class VillageGame extends FlameGame with KeyboardEvents {
   int get killGoal => kQuick ? 3 : 10 * (stageIdx + 1);
   bool get portalOpen => bossDefeated;
 
-  /// Height of the highest floor under [p] that is at or below [zMax] (0 = ground).
-  double supportAt(Vector2 p, double zMax) {
-    var best = 0.0;
+  /// The highest floor under [p] whose top is at or below [zMax] (null = ground).
+  FloorPlatform? floorAt(Vector2 p, double zMax) {
+    FloorPlatform? best;
     for (final f in floors) {
-      if (f.z <= zMax && f.z > best && f.covers(p)) best = f.z;
+      if (f.z <= zMax && (best == null || f.z > best.z) && f.covers(p)) best = f;
     }
     return best;
   }
   bool get isLastStage => stageIdx == stages.length - 1;
+
+  Vector2 _at(String id) {
+    final p = layout.of(id);
+    return Vector2(p.$1, p.$2);
+  }
+
+  /// Moves the on-screen buttons to the saved layout.
+  void applyLayout() {
+    _buttons.forEach((id, b) => b.position = _at(id));
+  }
 
   @override
   Color backgroundColor() => Colors.black;
@@ -97,7 +112,6 @@ class VillageGame extends FlameGame with KeyboardEvents {
   @override
   Future<void> onLoad() async {
     await images.loadAll([
-      for (final k in EnemyKind.values) if (k.file != null) k.file!,
       for (final folder in CharAnims.folders)
         for (final spec in CharAnims.specs.values) '$folder/${spec.$1}.png',
       for (final p in projDefs.values) '${p.folder}/Proj.png',
@@ -127,22 +141,24 @@ class VillageGame extends FlameGame with KeyboardEvents {
       background: CircleComponent(radius: 50, paint: Paint()..color = Colors.black.withValues(alpha: .35)),
       margin: const EdgeInsets.only(left: 36, bottom: 36),
     );
+    layout = await ButtonLayout.load();
+    _buttons = {
+      // Attack 1 (basic), then the two skills (attack 2 / attack 3).
+      'attack': ActionButton('Đánh', 'J', const Color(0xFFE53935), 36, _at('attack'), () => player.useSkill(0),
+          cooldown: () => player.cooldownFraction(0)),
+      'skill1': ActionButton('', 'K', const Color(0xFF1E88E5), 28, _at('skill1'), () => player.useSkill(1),
+          cooldown: () => player.cooldownFraction(1), title: () => player.skillName(1)),
+      'skill2': ActionButton('', 'L', const Color(0xFF7E57C2), 28, _at('skill2'), () => player.useSkill(2),
+          cooldown: () => player.cooldownFraction(2), title: () => player.skillName(2)),
+      // Support buttons: run (costs mana) and jump.
+      'run': ActionButton('Chạy', 'Shift', const Color(0xFFF9A825), 22, _at('run'), () => player.toggleRun(),
+          active: () => player.running),
+      'jump': ActionButton('Nhảy', 'X', const Color(0xFF00ACC1), 22, _at('jump'), () => player.jump(),
+          cooldown: () => player.jumpCooldownFraction),
+    };
     camera.viewport.addAll([
       joystick,
-      // Attack 1 (basic), then the two skills (attack 2 / attack 3).
-      ActionButton('Đánh', 'J', const Color(0xFFE53935), 36, Vector2(745, 385), () => player.useSkill(0),
-          cooldown: () => player.cooldownFraction(0)),
-      ActionButton('', 'K', const Color(0xFF1E88E5), 28, Vector2(662, 405), () => player.useSkill(1),
-          cooldown: () => player.cooldownFraction(1), title: () => player.skillName(1)),
-      ActionButton('', 'L', const Color(0xFF7E57C2), 28, Vector2(692, 325), () => player.useSkill(2),
-          cooldown: () => player.cooldownFraction(2), title: () => player.skillName(2)),
-      // Support buttons: run, shield, jump.
-      ActionButton('Chạy', 'Shift', const Color(0xFFF9A825), 22, Vector2(598, 424), () => player.toggleRun(),
-          active: () => player.running),
-      ActionButton('Khiên', 'F', const Color(0xFF43A047), 22, Vector2(578, 372), () => player.useSkill(3),
-          cooldown: () => player.cooldownFraction(3), active: () => player.shielded),
-      ActionButton('Nhảy', 'X', const Color(0xFF00ACC1), 22, Vector2(612, 322), () => player.jump(),
-          cooldown: () => player.jumpCooldownFraction),
+      ..._buttons.values,
       Hud(),
     ]);
     pauseEngine(); // wait on the main menu overlay
@@ -186,6 +202,7 @@ class VillageGame extends FlameGame with KeyboardEvents {
   /// New run with [heroIndex] from stage 1.
   Future<void> startNew(int heroIndex, {int stage = 0}) async {
     selectedHero = heroIndex;
+    revivesLeft = 2;
     state.reset();
     stageIdx = stage.clamp(0, stages.length - 1);
     runKills = 0;
@@ -200,6 +217,7 @@ class VillageGame extends FlameGame with KeyboardEvents {
   Future<bool> continueRun() async {
     final run = await SaveStore.loadRun();
     if (run == null) return false;
+    revivesLeft = 2;
     try {
       _applyRun(run);
     } catch (_) {
@@ -208,17 +226,6 @@ class VillageGame extends FlameGame with KeyboardEvents {
     await _enterStage(checkpoint: false);
     _beginPlay();
     return true;
-  }
-
-  /// After a game over: retry the current stage from its checkpoint.
-  Future<void> retryStage() async {
-    final run = _checkpoint;
-    if (run == null) return;
-    _applyRun(run);
-    state.hp = state.maxHp;
-    state.mp = state.maxMp;
-    await _enterStage(checkpoint: false);
-    _beginPlay();
   }
 
   Map<String, dynamic> _runJson() => {
@@ -255,7 +262,7 @@ class VillageGame extends FlameGame with KeyboardEvents {
     _flushRecords();
     inPlay = false;
     _keys.clear();
-    for (final o in const ['hud', 'inventory', 'quests', 'shop', 'pause', 'gameover', 'victory', 'select', 'help']) {
+    for (final o in const ['hud', 'inventory', 'quests', 'shop', 'pause', 'gameover', 'victory', 'select', 'help', 'settings', 'layout']) {
       overlays.remove(o);
     }
     overlays.add('menu');
@@ -275,6 +282,19 @@ class VillageGame extends FlameGame with KeyboardEvents {
     _keys.clear();
     overlays.add('pause');
     pauseEngine();
+  }
+
+  void openSettings() {
+    _keys.clear();
+    overlays.add('settings');
+    pauseEngine();
+  }
+
+  void closeSettings() {
+    overlays
+      ..remove('settings')
+      ..remove('layout');
+    if (inPlay && !panelOpen && !overlays.isActive('pause')) resumeEngine();
   }
 
   void closePause() {
@@ -321,8 +341,7 @@ class VillageGame extends FlameGame with KeyboardEvents {
       _spawnMonster(floor: f);
     }
     if (checkpoint) {
-      _checkpoint = _runJson();
-      SaveStore.saveRun(_checkpoint!);
+      SaveStore.saveRun(_runJson());
     }
     world.add(FloatingText('Màn ${stageIdx + 1}: ${stageDef.name}  (hạ $killGoal quái để gọi boss)', Vector2(400, 140), Colors.yellow));
     GameAudio.music('w${stageDef.bg + 1}');
@@ -358,6 +377,24 @@ class VillageGame extends FlameGame with KeyboardEvents {
     GameAudio.music(null);
     GameAudio.sfx('gameover');
     pauseEngine();
+  }
+
+  /// Gets up again where you fell (at most twice per run).
+  void revive() {
+    if (inPlay || revivesLeft <= 0 || !overlays.isActive('gameover')) return;
+    revivesLeft--;
+    state.hp = state.maxHp;
+    state.mp = state.maxMp;
+    state.touch();
+    player.revive();
+    overlays
+      ..remove('gameover')
+      ..add('hud');
+    inPlay = true;
+    GameAudio.music(bossSpawned ? 'boss' : 'w${stageDef.bg + 1}');
+    GameAudio.sfx('levelup');
+    fx.ring(player.position.clone(), const Color(0xFF9CFFB0));
+    resumeEngine();
   }
 
   void victory() {
@@ -403,7 +440,7 @@ class VillageGame extends FlameGame with KeyboardEvents {
 
   void _spawnMonster({EnemyKind? kind, FloorPlatform? floor}) {
     var k = kind ?? _randomKind();
-    if (floor != null && !k.isSprite) k = EnemyKind.slime; // floors host the small monsters
+    if (floor != null) k = EnemyKind.mino1; // floors host the small monsters
     final m = Monster(k, stageIdx, floor: floor)
       ..position = floor != null
           ? Vector2(floor.left + 24 + rng.nextDouble() * (floor.floorW - 48), floor.y)
@@ -414,7 +451,7 @@ class VillageGame extends FlameGame with KeyboardEvents {
   }
 
   /// Boss minions.
-  void spawnAdd() => _spawnMonster(kind: EnemyKind.slime);
+  void spawnAdd() => _spawnMonster(kind: EnemyKind.mino1);
 
   /// 2-3 raised floors from the tileset, alternating left/right. Each is at
   /// least 40% of the screen wide and the lowest one sits above the boss's head.
@@ -425,15 +462,17 @@ class VillageGame extends FlameGame with KeyboardEvents {
     floors.clear();
     const tints = [Color(0xFFD8B8C0), Color(0xFFD0A8B0), Color(0xFFB8BCDC), Color(0xFFC4AAC4)];
     final count = stageIdx >= 3 ? 3 : 2;
-    final firstLeft = rng.nextBool();
+    final r = Random(stageIdx * 7919 + 13); // the same layout every time you play the stage
+    final firstLeft = stageIdx.isEven;
     for (var i = 0; i < count; i++) {
       final left = i == 1 ? !firstLeft : (i == 0 ? firstLeft : !firstLeft);
-      final width = FloorPlatform.minWidth + 10 + rng.nextDouble() * 60;
-      final edge = rng.nextDouble() * 40;
+      final width = FloorPlatform.minWidth + 10 + r.nextDouble() * 60;
+      final edge = r.nextDouble() * 40;
       final cx = left ? 10 + edge + width / 2 : worldWidth - 10 - edge - width / 2;
-      final z = switch (i) { 0 => 122.0 + rng.nextDouble() * 8, 1 => 200.0 + rng.nextDouble() * 6, _ => 126.0 + rng.nextDouble() * 8 };
-      final depth = switch (i) { 0 => 355.0, 1 => 300.0, _ => 398.0 } + rng.nextDouble() * 10;
-      final f = FloorPlatform(cx: cx, depth: depth, floorW: width, z: z, style: rng.nextInt(3), tint: tints[stageDef.bg]);
+      final z = switch (i) { 0 => 118.0 + r.nextDouble() * 6, 1 => 190.0 + r.nextDouble() * 6, _ => 120.0 + r.nextDouble() * 6 };
+      final depth = switch (i) { 0 => 355.0, 1 => 300.0, _ => 398.0 } + r.nextDouble() * 10;
+      final f = FloorPlatform(
+          cx: cx, depth: depth, floorW: width, z: z, style: r.nextInt(3), tint: tints[stageDef.bg], seed: stageIdx * 10 + i);
       floors.add(f);
       world.add(f);
     }
@@ -448,7 +487,7 @@ class VillageGame extends FlameGame with KeyboardEvents {
     final boss = stageDef.boss;
     bossSpawned = true;
     _respawns.clear();
-    bossRef = Monster(EnemyKind.slime, stageIdx, boss: boss)..position = Vector2(worldWidth - 140, 345);
+    bossRef = Monster(EnemyKind.mino1, stageIdx, boss: boss)..position = Vector2(worldWidth - 140, 345);
     monsters.add(bossRef!);
     world.add(bossRef!);
     fx.ring(bossRef!.position.clone(), const Color(0xFFFF6040), count: 44, speed: 250);
@@ -460,8 +499,12 @@ class VillageGame extends FlameGame with KeyboardEvents {
 
   void monsterDied(Monster m) {
     monsters.remove(m);
-    state.onKill();
     runKills++;
+    if (state.onKill()) {
+      GameAudio.sfx('levelup');
+      fx.ring(player.position.clone(), const Color(0xFFFFE070));
+      world.add(FloatingText('LEVEL UP! Lv ${state.level}', player.position + Vector2(0, -110), Colors.yellow));
+    }
     state.touch();
     final gold = m.goldDrop;
     state.gold += gold;
@@ -486,10 +529,9 @@ class VillageGame extends FlameGame with KeyboardEvents {
           Vector2(400, 150), Colors.yellow));
       return;
     }
-    final human = m.human;
-    drop(ItemId.gel, human ? 0 : .65);
-    drop(ItemId.potion, human ? .3 : .15);
-    drop(ItemId.stone, human ? .4 : .2);
+    drop(ItemId.gel, m.kind.folder.startsWith('Minotaur') ? .5 : .1);
+    drop(ItemId.potion, .2);
+    drop(ItemId.stone, .25);
     if (!bossSpawned) {
       stageKills++;
       if (stageKills >= killGoal) {
@@ -550,6 +592,7 @@ class VillageGame extends FlameGame with KeyboardEvents {
       ..addAll(keysPressed);
     if (event is! KeyDownEvent || !inPlay) return KeyEventResult.handled;
     final k = event.logicalKey;
+    if (overlays.isActive('settings') || overlays.isActive('layout')) return KeyEventResult.handled;
     if (overlays.isActive('pause')) {
       if (k == LogicalKeyboardKey.escape || k == LogicalKeyboardKey.keyP) closePause();
       return KeyEventResult.handled;
@@ -570,8 +613,6 @@ class VillageGame extends FlameGame with KeyboardEvents {
       player.useSkill(1);
     } else if (k == LogicalKeyboardKey.digit2 || k == LogicalKeyboardKey.keyL) {
       player.useSkill(2);
-    } else if (k == LogicalKeyboardKey.digit3 || k == LogicalKeyboardKey.keyF) {
-      player.useSkill(3);
     } else if (k == LogicalKeyboardKey.keyR) {
       player.toggleRun();
     } else if (k == LogicalKeyboardKey.keyX) {
@@ -745,7 +786,7 @@ class Hud extends PositionComponent with HasGameReference<VillageGame> {
     final p = game.state;
     canvas.drawRRect(RRect.fromRectAndRadius(const Rect.fromLTWH(10, 10, 190, 120), const Radius.circular(8)),
         Paint()..color = Colors.black54);
-    _text.render(canvas, 'Lv ${p.level}   EXP ${p.exp}/${p.expToNext}', Vector2(18, 14));
+    _text.render(canvas, 'Lv ${p.level}   Quái ${p.exp}/${p.expToNext}', Vector2(18, 14));
     _bar(canvas, 18, 32, p.hp / p.maxHp, Colors.red, '${p.hp}/${p.maxHp}');
     _bar(canvas, 18, 50, p.mp / p.maxMp, Colors.blue, '${p.mp}/${p.maxMp}');
     _text.render(canvas, 'Vàng: ${p.gold}', Vector2(18, 72));

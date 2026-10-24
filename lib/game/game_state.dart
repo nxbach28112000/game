@@ -34,8 +34,8 @@ const itemDefs = <ItemId, ItemDef>{
       'Nhẹ và bền, dành cho chiến binh.', ItemKind.armor, 5),
   ItemId.stone: ItemDef('Đá nâng cấp', 'item_stone',
       'Dùng để cường hóa trang bị.', ItemKind.material),
-  ItemId.gel: ItemDef('Thạch slime', 'item_gel',
-      'Rơi ra từ quái slime.', ItemKind.material),
+  ItemId.gel: ItemDef('Móng minotaur', 'item_gel',
+      'Rơi ra từ quái minotaur.', ItemKind.material),
 };
 
 class Slot {
@@ -114,7 +114,7 @@ class GameState extends ChangeNotifier {
   static List<Quest> _newQuests() => [
     Quest('Diệt quái', 'Tiêu diệt 5 con quái quanh làng.', 5,
         rewardGold: 100, rewardExp: 60, rewardItem: ItemId.potion, rewardCount: 2),
-    Quest('Thu thập thạch', 'Mang cho ta 6 Thạch slime.', 6,
+    Quest('Thu thập móng', 'Mang cho ta 6 Móng minotaur.', 6,
         collect: ItemId.gel,
         rewardGold: 150,
         rewardItem: ItemId.ironSword),
@@ -129,9 +129,14 @@ class GameState extends ChangeNotifier {
         rewardCount: 3),
   ];
 
-  int get expToNext => level * 50;
-  int get attack => 8 + level * 3 + weapon.def.power + weapon.plus * 3;
-  int get defense => level + armor.def.power + armor.plus * 2;
+  /// Kills needed to go from the current level to the next (20, 30, 40...).
+  int get expToNext => 10 * (level + 1);
+
+  /// Every level adds 15% on top of the current stats (HP, MP, attack, defence).
+  double get statMul => pow(1.15, level - 1).toDouble();
+
+  int get attack => ((14 + weapon.def.power * 1.5 + weapon.plus * 4) * statMul * 1.5).round();
+  int get defense => ((1 + armor.def.power + armor.plus * 2) * statMul).round();
 
   void touch() => notifyListeners();
   // ---- save / load ----
@@ -181,14 +186,16 @@ class GameState extends ChangeNotifier {
 
   // ---- progression ----
   /// Returns true if the player levelled up.
-  bool gainExp(int v) {
-    exp += v;
+  bool gainExp(int v) => _addProgress(v ~/ 5); // quest rewards count as kills
+
+  bool _addProgress(int kills) {
+    exp += kills;
     var up = false;
     while (exp >= expToNext) {
       exp -= expToNext;
       level++;
-      maxHp += 20;
-      maxMp += 10;
+      maxHp = (maxHp * 1.15).round();
+      maxMp = (maxMp * 1.15).round();
       hp = maxHp;
       mp = maxMp;
       up = true;
@@ -311,10 +318,11 @@ class GameState extends ChangeNotifier {
     return 'Nhận thưởng: ${q.rewardText}';
   }
 
-  void onKill() {
+  /// Counts a kill; returns true if it levelled the hero up.
+  bool onKill() {
     for (final q in quests) {
       if (q.status == QuestStatus.active && q.collect == null) q.kills++;
     }
-    notifyListeners();
+    return _addProgress(1);
   }
 }

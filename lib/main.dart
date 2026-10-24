@@ -48,6 +48,8 @@ class _GameScreenState extends State<GameScreen> {
           'shop': (context, g) => ShopPanel(game: g),
           'gameover': (context, g) => GameOverScreen(game: g),
           'victory': (context, g) => VictoryScreen(game: g),
+          'settings': (context, g) => SettingsScreen(game: g),
+          'layout': (context, g) => LayoutEditor(game: g),
         },
       ));
 }

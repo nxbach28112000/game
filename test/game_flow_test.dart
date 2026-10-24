@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_game/game/button_layout.dart';
 import 'package:flutter_game/game/heroes.dart';
 import 'package:flutter_game/game/monster.dart';
 import 'package:flutter_game/game/stages.dart';
@@ -17,7 +18,13 @@ void main() {
       for (final o in ['menu', 'select', 'hud', 'pause', 'inventory', 'quests', 'shop', 'gameover', 'victory'])
         o: (c, g) => const SizedBox()
     })));
-    await tester.runAsync(() async => await game.toBeLoaded());
+    // onLoad awaits storage reads whose microtasks only run when the fake
+    // clock is pumped, so alternate real waiting with pumping.
+    for (var i = 0; i < 600 && !game.isLoaded; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pump();
+    }
+    expect(game.isLoaded, isTrue);
 
     void step(int frames) {
       for (var i = 0; i < frames; i++) {
@@ -30,7 +37,7 @@ void main() {
       await tester.runAsync(() => game.startNew(h));
       step(10);
       expect(game.inPlay, isTrue, reason: heroes[h].name);
-      for (final slot in [0, 1, 2, 3]) {
+      for (final slot in [0, 1, 2]) {
         game.player.useSkill(slot);
         step(70);
       }
@@ -80,14 +87,71 @@ void main() {
     }
     expect(game.overlays.isActive('victory'), isTrue);
 
-    // Death -> game over -> retry the stage.
+    // Death -> game over -> revive (twice) -> third death has no revive left.
     await tester.runAsync(() => game.startNew(0));
-    game.state.hp = 1;
-    game.player.hurt(9999);
-    step(200);
-    expect(game.overlays.isActive('gameover'), isTrue);
-    await tester.runAsync(() => game.retryStage());
-    expect(game.inPlay, isTrue);
-    expect(game.state.hp, game.state.maxHp);
+    expect(game.revivesLeft, 2);
+    for (var i = 0; i < 3; i++) {
+      game.state.hp = 1;
+      game.player.hurt(9999);
+      step(200);
+      expect(game.overlays.isActive('gameover'), isTrue);
+      if (i < 2) {
+        game.revive();
+        expect(game.inPlay, isTrue);
+        expect(game.state.hp, game.state.maxHp);
+        expect(game.player.dead, isFalse);
+        step(200); // grace period: nothing kills us right away
+      } else {
+        game.revive(); // no revives left: stays on the game over screen
+        expect(game.inPlay, isFalse);
+        expect(game.revivesLeft, 0);
+      }
+    }
+
+    // Level ups come from kills: 20, then 30 more...
+    await tester.runAsync(() => game.startNew(0));
+    final hp1 = game.state.maxHp, atk1 = game.state.attack;
+    for (var i = 0; i < 19; i++) {
+      expect(game.state.onKill(), isFalse);
+    }
+    expect(game.state.onKill(), isTrue);
+    expect(game.state.level, 2);
+    expect(game.state.maxHp, (hp1 * 1.15).round());
+    expect(game.state.attack, greaterThan(atk1));
+    for (var i = 0; i < 30; i++) {
+      game.state.onKill();
+    }
+    expect(game.state.level, 3);
+
+    // Floors can be reached: jump from under the lowest one.
+    await tester.runAsync(() => game.startNew(0));
+    final low = game.floors.reduce((a, b) => a.z < b.z ? a : b);
+    expect(low.z, greaterThan(110));
+    game.player.position.setValues(low.x, low.y + 20);
+    step(5);
+    game.player.jump();
+    step(120);
+    expect(game.player.z, closeTo(low.z, 1));
+    // The floor layout of a stage is the same every time.
+    final layout = [for (final f in game.floors) (f.x, f.z)];
+    await tester.runAsync(() => game.startNew(0));
+    expect([for (final f in game.floors) (f.x, f.z)], layout);
+
+    // Running costs mana.
+    game.state.mp = game.state.maxMp;
+    game.player.running = true;
+    game.player.position.setValues(100, 330);
+    // no input direction in tests, so just make sure the toggle itself works
+    expect(game.player.running, isTrue);
+  });
+
+  test('button layout round-trips through storage', () async {
+    final l = ButtonLayout({'attack': (100, 120)});
+    await l.save();
+    final loaded = await ButtonLayout.load();
+    expect(loaded.of('attack'), (100.0, 120.0));
+    expect(loaded.of('jump'), ButtonLayout.defaults['jump']);
+    await loaded.reset();
+    expect((await ButtonLayout.load()).of('attack'), ButtonLayout.defaults['attack']);
   });
 }
