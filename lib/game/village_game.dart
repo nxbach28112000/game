@@ -68,7 +68,7 @@ class VillageGame extends FlameGame with KeyboardEvents {
   @override
   Future<void> onLoad() async {
     await images.loadAll([
-      'monster.png',
+      for (final k in MonsterKind.values) k.file,
       for (final folder in CharAnims.folders)
         for (final spec in CharAnims.specs.values) '$folder/${spec.$1}.png',
       for (final d in itemDefs.values) '${d.icon}.png',
@@ -214,7 +214,8 @@ class VillageGame extends FlameGame with KeyboardEvents {
   }
 
   void _spawnMonster({bool onPlatform = false}) {
-    final m = Monster(MonsterKind.slime, stage, onPlatform: onPlatform)
+    final kind = MonsterKind.values[_rng.nextInt(min(stage + 1, MonsterKind.values.length))];
+    final m = Monster(kind, stage, onPlatform: onPlatform)
       ..position = onPlatform
           ? Vector2(platform.left + 20 + _rng.nextDouble() * (FlyPlatform.slabWidth - 40), platform.y)
           : Vector2(250 + _rng.nextDouble() * (worldWidth - 340), groundTop + 60 + _rng.nextDouble() * (groundBottom - groundTop - 70));
@@ -819,10 +820,25 @@ class FlyPlatform extends PositionComponent with HasGameReference<VillageGame> {
   }
 }
 
-enum MonsterKind { slime }
+/// New kinds unlock as the stage number grows (see VillageGame._spawnMonster).
+enum MonsterKind {
+  slime('monsters/slime.png'),
+  goblin('monsters/goblin.png'),
+  bat('monsters/bat.png'),
+  spider('monsters/spider.png');
+
+  const MonsterKind(this.file);
+  final String file;
+
+  double get speed => switch (this) { slime => 55, goblin => 75, bat => 95, spider => 65 };
+  double get hpMul => switch (this) { slime => 1, goblin => 1.5, bat => .8, spider => 2 };
+  double get dmgMul => switch (this) { slime => 1, goblin => 1.3, bat => .9, spider => 1.6 };
+  int get exp => switch (this) { slime => 15, goblin => 25, bat => 20, spider => 40 };
+  double get drawSize => switch (this) { goblin => 64, spider => 56, _ => 48 };
+}
 
 class Monster extends PositionComponent with HasGameReference<VillageGame> {
-  Monster(this.kind, this.stage, {this.onPlatform = false}) : maxHp = 40 + stage * 25, super(size: Vector2(48, 48), anchor: Anchor.bottomCenter) {
+  Monster(this.kind, this.stage, {this.onPlatform = false}) : maxHp = ((40 + stage * 25) * kind.hpMul).round(), super(size: Vector2(48, 48), anchor: Anchor.bottomCenter) {
     hp = maxHp;
   }
 
@@ -842,7 +858,13 @@ class Monster extends PositionComponent with HasGameReference<VillageGame> {
 
   @override
   Future<void> onLoad() async {
-    _frames = [for (var i = 0; i < 2; i++) game.sprite('monster.png', i * 16.0, 0, 16, 16)];
+    _frames = switch (kind) {
+      // 3 colour rows (picked by stage) x 3 idle frames, 24px cells.
+      MonsterKind.slime => [for (var i = 0; i < 3; i++) game.sprite(kind.file, i * 24.0, (stage % 3) * 24.0, 24, 24)],
+      // 8 colour rows x 7 walk frames, 32px cells.
+      MonsterKind.goblin => [for (var i = 0; i < 7; i++) game.sprite(kind.file, i * 32.0, (stage % 8) * 32.0, 32, 32)],
+      _ => [game.sprite(kind.file)],
+    };
   }
 
   void hurt(int dmg) {
@@ -850,7 +872,7 @@ class Monster extends PositionComponent with HasGameReference<VillageGame> {
     game.world.add(FloatingText('$dmg', position + Vector2(0, -50), Colors.white));
     position.x += (x > game.player.x ? 1 : -1) * 16;
     if (hp <= 0) {
-      if (game.state.gainExp(15)) {
+      if (game.state.gainExp(kind.exp)) {
         game.world.add(FloatingText('LEVEL UP!', game.player.position + Vector2(0, -110), Colors.yellow));
       }
       game.monsterDied(this);
@@ -866,11 +888,11 @@ class Monster extends PositionComponent with HasGameReference<VillageGame> {
     final to = p.position - position;
     final dist = to.length;
     if (dist < 220 && !p.dead && (p.z - z).abs() < 50) {
-      if (dist > 40) position += to.normalized() * 60 * dt;
+      if (dist > 40) position += to.normalized() * kind.speed * dt;
       if (to.x.abs() > 4) _faceRight = to.x > 0;
       if (dist < 55 && _atkCd <= 0) {
         _atkCd = 1.2;
-        p.hurt(10 + game.state.level * 2 + stage * 3);
+        p.hurt(((10 + game.state.level * 2 + stage * 3) * kind.dmgMul).round());
       }
     } else {
       _wanderT -= dt;
@@ -902,7 +924,10 @@ class Monster extends PositionComponent with HasGameReference<VillageGame> {
       canvas.translate(size.x, 0);
       canvas.scale(-1, 1);
     }
-    _frames[(_t * 2.5).floor() % 2].render(canvas, size: size, overridePaint: _pixel);
+    final fly = kind == MonsterKind.bat ? 14 + sin(_t * 6) * 5 : 0.0;
+    final frame = _frames[(_t * (kind == MonsterKind.goblin ? 8 : 4)).floor() % _frames.length];
+    final d = kind.drawSize;
+    frame.render(canvas, position: Vector2((size.x - d) / 2, size.y - d - fly), size: Vector2.all(d), overridePaint: _pixel);
     canvas.restore();
     canvas.drawRect(const Rect.fromLTWH(4, -6, 40, 5), Paint()..color = Colors.black54);
     canvas.drawRect(Rect.fromLTWH(4, -6, 40 * hp / maxHp, 5), Paint()..color = Colors.redAccent);
